@@ -129,6 +129,26 @@ test.describe('한글(HWP·HWPX) 문서', () => {
     expect(readHwp((await downloadAs(page, /^HWP로 내려받기/)).bytes).map((p) => p.sizePt)).toEqual([18, 10, 10, 13, 10]);
   });
 
+  test('내 규칙: 글꼴을 바꾸면 모든 언어 칸이 바뀌어 파일에 반영되고, 되돌리면 처음 글꼴로 돌아간다', async ({ page }) => {
+    await loginAs(page);
+    await openFile(page, makeHwp('hwp'));
+    const original = readHwp((await downloadAs(page, /^HWP로 내려받기/)).bytes)[0]!.fonts;
+    expect(original).toHaveLength(7);
+    expect(new Set(original)).not.toContain('함초롬돋움'); // 처음에는 다른 글꼴이다
+
+    await fixByRule(page, '본문은 함초롬돋움');
+    await page.getByRole('tab', { name: /변경 내역/ }).click();
+    const card = page.getByTestId('proposal-card').filter({ hasText: '글꼴을 함초롬돋움' });
+    await card.getByRole('button', { name: '적용' }).click();
+    await expect(card).toContainText('적용됨');
+    const changed = readHwp((await downloadAs(page, /^HWP로 내려받기/)).bytes);
+    for (const p of changed) expect(p.fonts, p.text).toEqual(Array(7).fill('함초롬돋움'));
+
+    await card.getByRole('button', { name: '되돌리기' }).click();
+    await expect(card.getByRole('button', { name: '적용' })).toBeVisible();
+    expect(readHwp((await downloadAs(page, /^HWP로 내려받기/)).bytes)[0]!.fonts).toEqual(original);
+  });
+
   test('"문서에서 보기"를 누르면 한글 편집기가 그 문단이 있는 쪽으로 이동한다', async ({ page }) => {
     await loginAs(page);
     await openFile(page, makeLongHwp());

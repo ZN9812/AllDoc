@@ -67,6 +67,8 @@ export interface ParagraphRead {
   text: string;
   sizePt: number;
   bold: boolean;
+  /** 언어 7칸(한글·영문·한자·일어·기타·기호·사용자)별 글꼴 이름 */
+  fonts: string[];
 }
 
 /** 파일(바이트)을 열어 본문 문단의 글과 첫 글자 서식을 읽는다. */
@@ -78,8 +80,8 @@ export function readHwp(bytes: Buffer | Uint8Array): ParagraphRead[] {
     for (let p = 0; p < d.getParagraphCount(s); p++) {
       const len = d.getParagraphLength(s, p);
       if (len === 0) continue;
-      const c = JSON.parse(d.getCharPropertiesAt(s, p, 0)) as { fontSize: number; bold: boolean };
-      out.push({ text: d.getTextRange(s, p, 0, len), sizePt: c.fontSize / 100, bold: c.bold });
+      const c = JSON.parse(d.getCharPropertiesAt(s, p, 0)) as { fontSize: number; bold: boolean; fontFamilies?: string[] };
+      out.push({ text: d.getTextRange(s, p, 0, len), sizePt: c.fontSize / 100, bold: c.bold, fonts: c.fontFamilies ?? [] });
     }
   }
   return out;

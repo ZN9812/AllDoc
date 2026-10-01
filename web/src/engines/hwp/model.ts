@@ -230,9 +230,11 @@ export class HwpModel {
       if (ids.some((id) => id < 0)) return failed('글꼴을 찾을 수 없어요.');
       props.fontIds = ids;
     } else if (s.fontFamily !== undefined) {
-      const id = this.doc.findOrCreateFontId(s.fontFamily);
-      if (id < 0) return failed(`글꼴 "${s.fontFamily}"을(를) 쓸 수 없어요.`);
-      props.fontId = id;
+      // 글꼴 목록은 언어(한글·영문·한자·일어·기타·기호·사용자)마다 따로 있고, 같은 글꼴이어도 목록마다 번호가 다를 수 있다
+      // (실제 문서에서는 대개 다르다). 그래서 번호 하나를 모든 언어에 쓰지 않고 언어마다 그 글꼴의 번호를 찾아 넣는다.
+      const ids = Array.from({ length: 7 }, (_, lang) => this.doc.findOrCreateFontIdForLang(lang, s.fontFamily as string));
+      if (ids.some((id) => id < 0)) return failed(`글꼴 "${s.fontFamily}"을(를) 쓸 수 없어요.`);
+      props.fontIds = ids;
     }
     if (s.fontFaces || s.fontFamily !== undefined) {
       if (before.fontFamilies?.length === 7) undo.fontFaces = before.fontFamilies;
