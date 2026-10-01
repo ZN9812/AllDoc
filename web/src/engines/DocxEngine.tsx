@@ -4,6 +4,7 @@ import 'superdoc/style.css';
 import { KIND_MIME } from '@alldoc/shared';
 import { describeLoadFailure } from './docx/errors';
 import { resolveSpans, type Span } from './docx/highlights';
+import { createLine } from './docx/line';
 import { DocxModel, type BlockLike, type DocxHost } from './docx/model';
 import { TOOLBAR_EXCLUDE, TOOLBAR_STRINGS } from './docx/toolbar';
 import type { EngineHandle, EngineProps, HighlightState, HighlightTarget } from './types';
@@ -124,23 +125,20 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
             return new Blob([blob], { type: DOCX_MIME });
           };
           const model = new DocxModel({ doc: api, exportDocx: rawExport });
-          // AI 변경은 여러 단계로 문서를 고친다. 저장·내려받기·읽기는 진행 중인 변경이 끝난 뒤에 해서 반쯤 바뀐 문서가 나가지 않게 한다.
-          let inflight: Promise<unknown> = Promise.resolve();
-          const exportDocx = async (): Promise<Blob> => {
-            await inflight;
-            return rawExport();
-          };
+          // 편집기에 대한 내보내기·읽기·변경을 한 줄로 세워 서로 겹치지 않게 한다.
+          // 편집기는 파일로 내보내는 동안 변경을 거절한다("읽기 전용 검토 모드" 오류). 그래서 자동 저장과 AI 변경이 겹치면 변경이 실패한다.
+          // 또 AI 변경은 여러 단계로 문서를 고치므로, 반쯤 바뀐 문서가 저장되거나 내려받아지는 것도 막는다.
+          // (model 안에서는 줄을 거치지 않는 rawExport 를 쓴다. 줄 안에서 줄을 다시 기다리면 영영 끝나지 않는다.)
+          const inLine = createLine();
+          const exportDocx = (): Promise<Blob> => inLine(rawExport);
           const handle: EngineHandle = {
             kind: 'docx',
             canFormat: true,
             getBlob: exportDocx,
             exportOptions: () => [{ id: 'native', label: 'DOCX', ext: 'docx', run: exportDocx }],
-            summarize: async () => {
-              await inflight;
-              return model.summarize();
-            },
-            apply: (ops) => {
-              const run = inflight.then(async () => {
+            summarize: () => inLine(() => model.summarize()),
+            apply: (ops) =>
+              inLine(async () => {
                 setBusy('AI 변경을 적용하는 중…');
                 try {
                   const r = await model.apply(ops);
@@ -150,10 +148,7 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
                 } finally {
                   setBusy(null);
                 }
-              });
-              inflight = run.catch(() => undefined);
-              return run;
-            },
+              }),
             setHighlights: (state) => {
               hl = state;
               void refresh(api);
