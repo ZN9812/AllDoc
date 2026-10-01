@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import * as pdfjs from 'pdfjs-dist';
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist';
+// 오래된 브라우저(기관 PC 등)에서도 열리도록 pdf.js 의 호환(legacy) 빌드를 쓴다.
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
+import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { blobToBytes } from '../lib/files';
 import { unsupported } from './applyOps';
 import type { EngineHandle, EngineProps, PagesApi } from './types';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+const ASSETS = `${import.meta.env.BASE_URL}pdfjs/`;
 
 interface PageBox {
   w: number;
@@ -23,7 +25,6 @@ export default function PdfEngine({ doc, toolsHost, onReady, onPages, onError }:
   const [boxes, setBoxes] = useState<PageBox[]>([]);
   const [zoom, setZoom] = useState(1);
   const hostRef = useRef<HTMLDivElement>(null);
-  const canvases = useRef(new Map<number, HTMLCanvasElement>());
   const thumbs = useRef(new Map<number, string>());
   const [current, setCurrent] = useState(0);
 
@@ -33,7 +34,15 @@ export default function PdfEngine({ doc, toolsHost, onReady, onPages, onError }:
     (async () => {
       try {
         const bytes = await blobToBytes(doc.blob);
-        task = pdfjs.getDocument({ data: bytes });
+        task = pdfjs.getDocument({
+          data: bytes,
+          // 글꼴이 들어 있지 않은 한글 PDF와 특수 이미지를 그리는 보조 파일(빌드 때 public/pdfjs 로 복사됨)
+          cMapUrl: `${ASSETS}cmaps/`,
+          cMapPacked: true,
+          standardFontDataUrl: `${ASSETS}standard_fonts/`,
+          wasmUrl: `${ASSETS}wasm/`,
+          iccUrl: `${ASSETS}iccs/`,
+        });
         const loaded = await task.promise;
         if (!alive) return;
         const sizes: PageBox[] = [];
@@ -53,7 +62,6 @@ export default function PdfEngine({ doc, toolsHost, onReady, onPages, onError }:
       alive = false;
       void task?.destroy();
       thumbs.current.clear();
-      canvases.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc.id]);
@@ -73,7 +81,31 @@ export default function PdfEngine({ doc, toolsHost, onReady, onPages, onError }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pdf]);
 
-  // 쪽 목록: 작은 그림은 본문에 그려진 canvas 를 줄여서 만든다.
+  // 지금 보고 있는 쪽 = 화면에 가장 많이 보이는 쪽
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!pdf || !host) return;
+    const ratios = new Map<number, number>();
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) ratios.set(Number((e.target as HTMLElement).dataset.page), e.isIntersecting ? e.intersectionRatio : 0);
+        let best = -1;
+        let bestRatio = 0;
+        for (const [i, r] of ratios) {
+          if (r > bestRatio || (r === bestRatio && r > 0 && i < best)) {
+            best = i;
+            bestRatio = r;
+          }
+        }
+        if (best >= 0) setCurrent(best);
+      },
+      { threshold: [0, 0.25, 0.5, 0.75, 1] },
+    );
+    host.querySelectorAll('canvas').forEach((c) => io.observe(c));
+    return () => io.disconnect();
+  }, [pdf, boxes, zoom]);
+
+  // 쪽 목록: 작은 그림은 따로 작게 그려서 만든다.
   useEffect(() => {
     if (!pdf) return;
     const api: PagesApi = {
@@ -128,7 +160,7 @@ export default function PdfEngine({ doc, toolsHost, onReady, onPages, onError }:
       {tools}
       <div className="pdf-engine" ref={hostRef}>
         {boxes.map((box, i) => (
-          <LazyPage key={`${i}-${zoom}`} pdf={pdf} index={i} box={box} zoom={zoom} register={(c) => c && canvases.current.set(i, c)} onVisible={() => setCurrent(i)} />
+          <LazyPage key={`${i}-${zoom}`} pdf={pdf} index={i} box={box} zoom={zoom} />
         ))}
       </div>
     </>
@@ -140,15 +172,11 @@ function LazyPage({
   index,
   box,
   zoom,
-  register,
-  onVisible,
 }: {
   pdf: PDFDocumentProxy;
   index: number;
   box: PageBox;
   zoom: number;
-  register: (c: HTMLCanvasElement | null) => void;
-  onVisible: () => void;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const drawn = useRef(false);
@@ -158,13 +186,10 @@ function LazyPage({
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
-    register(canvas);
     const io = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
-          if (!e.isIntersecting) continue;
-          onVisible();
-          if (drawn.current) continue;
+          if (!e.isIntersecting || drawn.current) continue;
           drawn.current = true;
           void (async () => {
             try {
@@ -187,5 +212,5 @@ function LazyPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <canvas ref={ref} style={{ width, height }} aria-label={`${index + 1}쪽`} />;
+  return <canvas ref={ref} data-page={index} style={{ width, height }} aria-label={`${index + 1}쪽`} />;
 }

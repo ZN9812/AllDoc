@@ -6,8 +6,11 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/copy-pdfjs-assets.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/copy-pdfjs-assets.mjs",
     "build": "tsc -p tsconfig.json && vite build",
+    "prepreview": "node scripts/copy-pdfjs-assets.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"

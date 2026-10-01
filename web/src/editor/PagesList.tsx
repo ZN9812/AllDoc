@@ -30,7 +30,7 @@ function PageThumb({ pages, index }: { pages: PagesApi; index: number }) {
       latest.current
         .thumb(index)
         .then(setSrc)
-        .catch(() => undefined);
+        .catch((e: unknown) => console.warn('쪽 미리보기를 만들지 못했어요', e));
     });
     io.observe(el);
     return () => io.disconnect();
