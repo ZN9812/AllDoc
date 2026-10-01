@@ -1,0 +1,331 @@
+/* ---- 편집 화면: 도구줄 / 쪽 목록 / 문서 / 오른쪽 탭 창 ---- */
+.editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.tools {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--chrome);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.tools:empty {
+  display: none;
+}
+
+.tb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.tb:hover {
+  background: var(--fill);
+}
+
+.tb[aria-pressed='true'] {
+  background: var(--hot);
+  color: var(--accent);
+}
+
+.tb:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tb svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.tsep {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: var(--line);
+}
+
+.tnote {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ebody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* 쪽 목록 */
+.pages {
+  flex: none;
+  width: 124px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 12px;
+  overflow: auto;
+  background: var(--chrome);
+  border-right: 1px solid var(--line);
+}
+
+.pgb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.pgb .th {
+  display: grid;
+  place-items: center;
+  width: 88px;
+  min-height: 60px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.pgb .th img,
+.pgb .th canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.pgb[aria-current='true'] .th {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--hot);
+}
+
+.pgb[aria-current='true'] {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* 문서가 놓이는 곳 */
+.canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  padding: 22px 18px 0;
+  background: var(--canvas);
+}
+
+.canvas.bare {
+  padding: 0;
+  overflow: hidden;
+}
+
+.canvas.bare > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.engine-loading,
+.engine-error {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 240px;
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.engine-error {
+  color: var(--danger);
+}
+
+/* 글 문서(TXT·MD) */
+.text-engine {
+  position: relative;
+  flex: none;
+  width: min(100%, 820px);
+  min-height: 100%;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  box-shadow: 0 1px 8px var(--shadow);
+  color: var(--paper-ink);
+}
+
+.text-engine .layer,
+.text-engine textarea {
+  margin: 0;
+  padding: 36px 44px;
+  font-family: var(--font-doc);
+  font-size: 14px;
+  line-height: 1.9;
+  letter-spacing: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: keep-all;
+  tab-size: 4;
+}
+
+.text-engine .layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: transparent;
+  pointer-events: none;
+}
+
+.text-engine .layer mark {
+  border-radius: 3px;
+  background: var(--paper-ai-bg);
+  color: transparent;
+  box-shadow: 0 0 0 2px var(--paper-ai-bg);
+}
+
+.text-engine .layer mark.focus {
+  box-shadow: 0 0 0 2px var(--paper-ai-bg), 0 0 0 4px var(--ai);
+}
+
+.text-engine textarea {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--paper-ink);
+  resize: none;
+  outline: none;
+  overflow: hidden;
+}
+
+.md-preview {
+  padding: 36px 44px;
+  font-family: var(--font-doc);
+  font-size: 14px;
+  line-height: 1.9;
+}
+
+.md-preview h1,
+.md-preview h2,
+.md-preview h3 {
+  margin: 1.2em 0 0.4em;
+  line-height: 1.4;
+}
+
+.md-preview pre {
+  padding: 12px 14px;
+  overflow: auto;
+  border-radius: var(--radius);
+  background: #eef1f6;
+}
+
+.md-preview code {
+  font-size: 0.92em;
+}
+
+.md-preview table {
+  border-collapse: collapse;
+}
+
+.md-preview th,
+.md-preview td {
+  padding: 4px 10px;
+  border: 1px solid #c9d0dc;
+}
+
+/* PDF */
+.pdf-engine {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+  padding-bottom: 28px;
+}
+
+.pdf-engine canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+  box-shadow: 0 1px 8px var(--shadow);
+}
+
+/* 한글(rhwp 편집기) / Word(SuperDoc) 가 들어가는 곳 */
+.hwp-engine,
+.docx-engine {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.hwp-engine iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.docx-engine {
+  overflow: auto;
+}
+
+.docx-mount {
+  min-height: 100%;
+}
+
+/* ---- 반응형: 좁은 화면에서는 쪽 목록을 접는다 ---- */
+@media (max-width: 920px) {
+  .pages {
+    display: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .canvas {
+    padding: 14px 10px 0;
+  }
+
+  .text-engine .layer,
+  .text-engine textarea,
+  .md-preview {
+    padding: 24px 20px;
+  }
+}

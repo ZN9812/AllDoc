@@ -1,9 +1,15 @@
+import '@fontsource-variable/noto-sans-kr';
+import './styles/tokens.css';
+import './styles/base.css';
+import './styles/layout.css';
+import './styles/editor.css';
+import './styles/panel.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import App from './App';
 
-// 임시 진입점: 다음 단계에서 앱 껍데기로 교체한다.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <h1>AllDoc</h1>
+    <App />
   </StrictMode>,
 );

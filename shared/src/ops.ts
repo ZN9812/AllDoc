@@ -6,12 +6,18 @@ import { CharStyleSchema, ParaStyleSchema } from './style';
  * 모든 편집기 연결부가 같은 3가지만 구현한다. (모르는 변경은 적용하지 않고 실패로 알린다.)
  */
 export const OpSchema = z.discriminatedUnion('type', [
-  /** 문단 안의 글을 바꾼다. find 가 문단에 없으면 적용하지 않는다. */
+  /**
+   * 문단 안의 글을 바꾼다. find 가 문단에 없으면 적용하지 않는다(stale).
+   * at 은 바꿀 글이 시작하는 위치 힌트다. 되돌리기(역변경)가 같은 자리를 정확히 가리키도록 적용 결과에 넣어 준다.
+   * AI 는 at 을 만들지 않는다.
+   */
   z.object({
     type: z.literal('replaceText'),
     paragraph: z.number().int().min(0),
-    find: z.string().min(1),
+    /** 비어 있으면 at 위치에 끼워 넣는다(삭제를 되돌리는 역변경이 쓴다). AI 가 만든 변경은 비어 있을 수 없다. */
+    find: z.string(),
     replace: z.string(),
+    at: z.number().int().min(0).optional(),
   }),
   /** 문단 전체의 글자 서식을 바꾼다. */
   z.object({

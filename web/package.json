@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@alldoc/shared": "^0.1.0",
+    "@fontsource-variable/noto-sans-kr": "^5.3.0",
     "@rhwp/core": "^0.8.6",
     "@rhwp/editor": "^0.8.6",
     "dompurify": "^3.4.16",
@@ -24,6 +25,7 @@
     "react-dom": "^19.3.0",
     "react-router-dom": "^7.18.4",
     "superdoc": "^2.19.1",
+    "zod": "^4.6.5",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

@@ -1,0 +1,69 @@
+/* 디자인 토큰: 밝은 관공서 청색(기본) + 어두운 작업 화면(야간 모드).
+   AI 가 고친 곳은 두 테마 모두 청록색 계열(--ai-*)로 통일한다. 문서 종이는 두 테마 모두 밝게 둔다. */
+
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --canvas: #e9eef6;
+  --chrome: #ffffff;
+  --ink: #14213d;
+  --muted: #5b6b86;
+  --line: #d3dbe8;
+  --fill: #f1f4fa;
+  --hot: #e1ebfb;
+
+  --accent: #1f5fd1;
+  --on-accent: #ffffff;
+  --danger: #b42318;
+  --warn: #b7791f;
+
+  --ai-bg: #d7f0ec;
+  --ai-ink: #0a5f57;
+  --ai: #14a394;
+
+  --paper: #ffffff;
+  --paper-ink: #1b2233;
+  --paper-ai-bg: #d7f0ec;
+  --paper-ai-ink: #0a5f57;
+
+  --shadow: rgba(20, 33, 61, 0.14);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --canvas: #0d121c;
+  --chrome: #161c2b;
+  --ink: #e8ecf6;
+  --muted: #98a3bd;
+  --line: #283148;
+  --fill: #1d2538;
+  --hot: #1f2f50;
+
+  --accent: #6aa5ff;
+  --on-accent: #0a1020;
+  --danger: #ff8a80;
+  --warn: #e3b341;
+
+  --ai-bg: #123b38;
+  --ai-ink: #bdeee8;
+  --ai: #3fd3c2;
+
+  --paper: #f7f8fb;
+  --paper-ink: #1a2030;
+  --paper-ai-bg: #d7f0ec;
+  --paper-ai-ink: #0a5f57;
+
+  --shadow: rgba(0, 0, 0, 0.5);
+}
+
+:root {
+  --radius: 8px;
+  --radius-sm: 5px;
+  --radius-lg: 12px;
+  --font: 'Noto Sans KR Variable', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+  --font-doc: 'Noto Sans KR Variable', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  --font-doc-serif: 'Noto Serif KR', 'Batang', serif;
+  --topbar-h: 54px;
+}
