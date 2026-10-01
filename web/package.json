@@ -1,0 +1,38 @@
+{
+  "name": "@alldoc/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "브라우저 앱(홈, 편집 화면, 문서 엔진 연결)",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@alldoc/shared": "^0.1.0",
+    "@rhwp/core": "^0.8.6",
+    "@rhwp/editor": "^0.8.6",
+    "dompurify": "^3.4.16",
+    "idb": "^8.0.3",
+    "marked": "^18.0.14",
+    "pdfjs-dist": "^6.3.289",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router-dom": "^7.18.4",
+    "superdoc": "^2.19.1",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@types/dompurify": "^3.0.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^29.1.1",
+    "vite": "^8.3.1"
+  }
+}

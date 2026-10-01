@@ -1,0 +1,31 @@
+{
+  "name": "alldoc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "한글(HWP)·Word 등 여러 문서를 한 곳에서 편집하고, AI가 서식 변경을 제안하는 웹 편집기 (AllDoc은 임시 이름)",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "workspaces": [
+    "shared",
+    "web",
+    "server"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w web && npm run build -w server",
+    "start": "npm run start -w server",
+    "typecheck": "npm run typecheck -w shared -w web -w server",
+    "test": "npm run test -w shared -w web -w server",
+    "test:e2e": "playwright test",
+    "check": "npm run typecheck && npm run test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
