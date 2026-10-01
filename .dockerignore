@@ -1,0 +1,17 @@
+# 이미지에 들어가지 않을 것들(빌드 속도와 크기, 비밀 값 유출 방지)
+.git
+.github
+node_modules
+**/node_modules
+**/dist
+.cache
+.env
+.env.*
+!.env.example
+data
+e2e/.data
+test-results
+playwright-report
+web/public/pdfjs
+web/public/rhwp-studio
+*.log

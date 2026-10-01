@@ -4,6 +4,7 @@ import { SOURCE_URL } from '../brand/brand';
 import Nav from '../components/Nav';
 import TopBar from '../components/TopBar';
 import { removeDoc } from '../lib/docs';
+import { DOCX_ENABLED } from '../lib/features';
 import { useTitle } from '../lib/useTitle';
 import { useAuth } from '../state/auth';
 import { useSettings, type ThemePref } from '../state/settings';
@@ -119,7 +120,10 @@ export default function SettingsPage() {
               에서 받을 수 있어요.
             </p>
             <p>
-              한글 문서는 rhwp(MIT), Word 문서는 SuperDoc(AGPL-3.0), PDF는 pdf.js(Apache-2.0)로 열어요. 자세한 목록은 소스 저장소의 THIRD_PARTY_NOTICES.md에 있어요.
+              {DOCX_ENABLED
+                ? '한글 문서는 rhwp(MIT), Word 문서는 SuperDoc(AGPL-3.0, DOCX 엔진은 별도 독점 라이선스), PDF는 pdf.js(Apache-2.0)로 열어요.'
+                : '한글 문서는 rhwp(MIT), PDF는 pdf.js(Apache-2.0)로 열어요.'}{' '}
+              자세한 목록은 소스 저장소의 THIRD_PARTY_NOTICES.md에 있어요.
             </p>
           </section>
         </main>

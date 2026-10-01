@@ -11,7 +11,8 @@ const engines: Record<DocKind, EngineComponent> = {
   pdf: lazy(() => import('./PdfEngine')),
   hwp: lazy(() => import('./HwpEngine')),
   hwpx: lazy(() => import('./HwpEngine')),
-  docx: lazy(() => import('./DocxEngine')),
+  // VITE_DISABLE_DOCX=1 로 빌드하면 SuperDoc 이 결과물에서 빠진다(조건이 이 자리에 있어야 빌드 도구가 안 쓰는 갈래를 뺀다).
+  docx: lazy<ComponentType<EngineProps>>(() => (import.meta.env.VITE_DISABLE_DOCX === '1' ? import('./DocxDisabled') : import('./DocxEngine'))),
 };
 
 export function engineFor(kind: DocKind): EngineComponent {

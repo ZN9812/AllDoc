@@ -7,6 +7,9 @@ const doc = (page: Page) => page.locator('.docx-engine');
 /** 화면에 그려진 줄(SuperDoc 은 같은 글을 접근성용 숨김 요소에도 두므로 그려진 줄만 고른다) */
 const line = (page: Page, text: string) => doc(page).locator('.superdoc-line', { hasText: text });
 
+// Word(DOCX) 지원을 끄고 빌드한 경우(VITE_DISABLE_DOCX=1)에는 이 시험을 건너뛴다.
+test.skip(process.env.VITE_DISABLE_DOCX === '1', 'DOCX 지원을 끄고 빌드함');
+
 test.describe('Word(DOCX) 문서', () => {
   test('DOCX 를 열면 Word 편집기(도구줄)와 문서 내용이 보인다', async ({ page }) => {
     await openFile(page, makeDocx());

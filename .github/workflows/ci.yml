@@ -5,10 +5,14 @@ on:
     branches: [main, "claude/**"]
   pull_request:
 
+env:
+  # 한글 편집기(rhwp-studio)를 준비하지 못하면 빌드를 멈춘다(HWP 편집이 빠진 채로 시험이 통과하지 않도록).
+  RHWP_STUDIO_STRICT: "1"
+
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,6 +22,49 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm run check:licenses
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  # Word(DOCX) 지원을 끄고 빌드해도 나머지가 동작하고, SuperDoc 이 결과물에 들어가지 않는지 확인한다.
+  no-docx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VITE_DISABLE_DOCX: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test e2e/docx-disabled.spec.ts e2e/home.spec.ts --project=desktop
+
+  # Dockerfile 로 이미지를 만들어 띄워 보고 건강 확인이 통과하는지 본다.
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t alldoc:ci .
+      - name: 컨테이너를 띄워 건강 확인
+        run: |
+          docker run -d --name alldoc-ci -p 8787:8787 -e AUTH_MODE=none -e AI_PROVIDER=mock alldoc:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8787/api/health; then echo; exit 0; fi
+            sleep 1
+          done
+          docker logs alldoc-ci
+          exit 1

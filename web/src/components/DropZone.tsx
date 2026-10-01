@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ACCEPT_ATTR } from '@alldoc/shared';
+import { ACCEPT, SUPPORTED_FORMATS_TEXT } from '../lib/features';
 
 export default function DropZone({ onFiles }: { onFiles: (files: FileList | File[]) => void }) {
   const [hot, setHot] = useState(false);
@@ -32,14 +32,14 @@ export default function DropZone({ onFiles }: { onFiles: (files: FileList | File
         <path d="M25 36V24m0 0-5 5m5-5 5 5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
       <p className="t">파일을 여기로 끌어다 놓으세요</p>
-      <p className="s">HWP · HWPX · DOCX · PDF · TXT · MD</p>
+      <p className="s">{SUPPORTED_FORMATS_TEXT}</p>
       <button type="button" className="btn primary" onClick={() => input.current?.click()}>
         파일 선택
       </button>
       <input
         ref={input}
         type="file"
-        accept={ACCEPT_ATTR}
+        accept={ACCEPT}
         hidden
         data-testid="file-input"
         onChange={(e) => {

@@ -5,6 +5,9 @@ import { expectNoHorizontalOverflow, openFile } from './helpers';
 /** 손가락으로 누르기 쉬운지: 높이·너비가 모두 이 값 이상이어야 한다. */
 const MIN_TOUCH = 36;
 
+// Word(DOCX) 지원을 끄고 빌드한 경우(VITE_DISABLE_DOCX=1)에는 이 시험을 건너뛴다.
+test.skip(process.env.VITE_DISABLE_DOCX === '1', 'DOCX 지원을 끄고 빌드함');
+
 test.describe('휴대폰 화면: Word(DOCX)', () => {
   test('쪽이 화면 너비에 맞춰 줄고, 가로로 넘치지 않는다', async ({ page }) => {
     await openFile(page, makeDocx());

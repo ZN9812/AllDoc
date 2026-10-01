@@ -21,7 +21,8 @@
     "typecheck": "npm run typecheck -w shared -w web -w server",
     "test": "npm run test -w shared -w web -w server",
     "test:e2e": "npm run build && playwright test",
-    "check": "npm run typecheck && npm run test"
+    "check": "npm run typecheck && npm run test && npm run check:licenses",
+    "check:licenses": "node scripts/check-licenses.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

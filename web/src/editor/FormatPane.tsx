@@ -4,6 +4,7 @@ import { loadReference, postConsistencyProposals, runConsistency, runReference, 
 import { summarizeFindings } from '../ai/consistency';
 import { supportsFormat } from '../engines/registry';
 import { aiAvailability, useAuth } from '../state/auth';
+import { DOCX_ENABLED } from '../lib/features';
 import { useRules } from '../state/rules';
 import { useSettings } from '../state/settings';
 import { COVERAGE_NOTE, MIXED_FORMAT_NOTE } from './coverage';
@@ -74,7 +75,7 @@ export default function FormatPane({ kind }: { kind: DocKind }) {
               기준 문서: <b>{reference.name}</b>
             </span>
           ) : (
-            <span>HWP · HWPX · DOCX 양식 파일</span>
+            <span>{DOCX_ENABLED ? 'HWP · HWPX · DOCX 양식 파일' : 'HWP · HWPX 양식 파일'}</span>
           )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" className="btn ghost sm" onClick={() => fileInput.current?.click()}>
@@ -90,7 +91,7 @@ export default function FormatPane({ kind }: { kind: DocKind }) {
             ref={fileInput}
             type="file"
             hidden
-            accept=".hwp,.hwpx,.docx,.txt,.md"
+            accept={DOCX_ENABLED ? '.hwp,.hwpx,.docx,.txt,.md' : '.hwp,.hwpx,.txt,.md'}
             data-testid="reference-input"
             onChange={(e) => {
               const f = e.target.files?.[0];

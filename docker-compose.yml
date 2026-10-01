@@ -1,0 +1,20 @@
+# 한 대의 서버에서 바로 띄우는 예시입니다. .env 를 채운 뒤:  docker compose up -d --build
+# HTTPS(구글 로그인에 필요)는 앞단의 역방향 프록시(Caddy, nginx 등)가 맡습니다. docs/DEPLOY.md 를 보세요.
+services:
+  alldoc:
+    build: .
+    image: alldoc:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # 컨테이너 안의 값. .env 의 PORT 는 컨테이너 안에서 듣는 포트이므로 아래 ports 와 맞춰 두세요.
+      DATA_DIR: /data
+    ports:
+      - "8787:8787"
+    volumes:
+      - alldoc-data:/data
+      # 작업별 AI 설정 파일을 쓰려면 아래 줄의 주석을 풀고, .env 에 AI_CONFIG_PATH=/config/ai.json 을 적으세요(docs/AI.md).
+      # - ./ai.json:/config/ai.json:ro
+
+volumes:
+  alldoc-data:

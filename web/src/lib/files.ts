@@ -1,4 +1,5 @@
 import { baseName, extOf, kindFromName, MAX_FILE_BYTES, type DocKind } from '@alldoc/shared';
+import { DOCX_ENABLED } from './features';
 
 export type FileCheck =
   | { ok: true; kind: DocKind }
@@ -10,7 +11,10 @@ export function checkUpload(file: { name: string; size: number }): FileCheck {
   if (!kind) {
     const ext = extOf(file.name);
     const what = ext ? `.${ext} 형식은` : '이 파일은';
-    return { ok: false, message: `${what} 아직 열 수 없어요. HWP, HWPX, DOCX, PDF, TXT, MD 파일을 올려 주세요.` };
+    return { ok: false, message: `${what} 아직 열 수 없어요. ${DOCX_ENABLED ? 'HWP, HWPX, DOCX, PDF, TXT, MD' : 'HWP, HWPX, PDF, TXT, MD'} 파일을 올려 주세요.` };
+  }
+  if (kind === 'docx' && !DOCX_ENABLED) {
+    return { ok: false, message: '이 서버에서는 Word(DOCX) 문서를 지원하지 않아요. HWP, HWPX, PDF, TXT, MD 파일을 올려 주세요.' };
   }
   if (file.size === 0) return { ok: false, message: '빈 파일이에요.' };
   if (file.size > MAX_FILE_BYTES) {
