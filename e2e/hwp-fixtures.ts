@@ -86,3 +86,96 @@ export function readHwp(bytes: Buffer | Uint8Array): ParagraphRead[] {
   }
   return out;
 }
+
+/** 표 칸 안의 글(표 안의 표 포함)을 문서 순서로, 빈 문단은 빼고 읽는다. 앱 코드와 따로 만든 읽기라서 결과를 독립적으로 확인할 수 있다. */
+export function readHwpCells(bytes: Buffer | Uint8Array): string[] {
+  const d = core2(bytes);
+  const out: string[] = [];
+  const asText = (sec: number, host: number, path: unknown[]): string => {
+    const json = JSON.stringify(path);
+    const len = d.getCellParagraphLengthByPath(sec, host, json);
+    return len > 0 ? d.getTextInCellByPath(sec, host, json, 0, len) : '';
+  };
+  const visit = (sec: number, host: number, tablePath: Array<{ controlIndex: number; cellIndex: number; cellParaIndex: number }>, depth: number): void => {
+    const last = tablePath[tablePath.length - 1]!;
+    const base = tablePath.slice(0, -1);
+    const dim = JSON.parse(depth === 1 ? d.getTableDimensions(sec, host, last.controlIndex) : d.getTableDimensionsByPath(sec, host, JSON.stringify(tablePath))) as { cellCount: number };
+    for (let k = 0; k < dim.cellCount; k++) {
+      const n = d.getCellParagraphCountByPath(sec, host, JSON.stringify([...base, { controlIndex: last.controlIndex, cellIndex: k, cellParaIndex: 0 }]));
+      for (let q = 0; q < n; q++) {
+        const path = [...base, { controlIndex: last.controlIndex, cellIndex: k, cellParaIndex: q }];
+        const text = asText(sec, host, path);
+        if (text.trim()) out.push(text);
+        for (let j = 0; j < 16; j++) {
+          const probe = [...path, { controlIndex: j, cellIndex: 0, cellParaIndex: 0 }];
+          try {
+            d.getTableDimensionsByPath(sec, host, JSON.stringify(probe));
+          } catch (e) {
+            if (/표가 아닙니다/.test(String((e as Error).message))) continue;
+            break;
+          }
+          visit(sec, host, probe, depth + 1);
+        }
+      }
+    }
+  };
+  for (let s = 0; s < d.getSectionCount(); s++) {
+    for (let p = 0; p < d.getParagraphCount(s); p++) {
+      const positions = JSON.parse(d.getControlTextPositions(s, p)) as unknown[];
+      for (let c = 0; c < positions.length; c++) {
+        try {
+          d.getTableDimensions(s, p, c);
+        } catch {
+          continue;
+        }
+        visit(s, p, [{ controlIndex: c, cellIndex: 0, cellParaIndex: 0 }], 1);
+      }
+    }
+  }
+  return out;
+}
+
+function core2(bytes: Buffer | Uint8Array) {
+  const Doc = core();
+  return new Doc(new Uint8Array(bytes));
+}
+
+/** 표 칸 문단을 [행, 열]로 지정한 서식으로 시험할 때 쓰는 모양 */
+export const TABLE_SAMPLE = {
+  title: '휴가 신청서',
+  closing: '감사합니다. 잘 되요.',
+  cells: ['성명', '홍길동', '동행', '오랫만에 가요', '신청 사유', '몇일 동안 휴가를 할려고 합니다'],
+  /** 오탈자를 모두 고친 뒤의 모습 */
+  fixedClosing: '감사합니다. 잘 돼요.',
+  fixedCells: ['성명', '홍길동', '동행', '오랜만에 가요', '신청 사유', '며칠 동안 휴가를 하려고 합니다'],
+};
+
+/**
+ * 시험용 한글 문서(표 포함): 제목, 2x2 표(둘째 줄 오른쪽 칸에 오탈자), 첫 줄 오른쪽 칸 안의 작은 표(오탈자), 맺음 문단(오탈자).
+ * sizes 가 true 면 표의 "성명" 칸만 16pt 굵게 해서 칸마다 서식이 다른 양식을 흉내 낸다.
+ */
+export function makeHwpWithTable(format: 'hwp' | 'hwpx' = 'hwp', name = `form.${format}`, opts: { sizes?: boolean } = {}): Upload {
+  const Doc = core();
+  const d = Doc.createEmpty();
+  d.createBlankDocument();
+  d.insertText(0, 0, 0, TABLE_SAMPLE.title);
+  d.splitParagraph(0, 0, d.getParagraphLength(0, 0));
+  const t = JSON.parse(d.createTable(0, 1, 0, 2, 2)) as { paraIdx: number; controlIdx: number };
+  const outer = ['성명', '홍길동', '신청 사유', '몇일 동안 휴가를 할려고 합니다'];
+  outer.forEach((text, k) => d.insertTextInCell(0, t.paraIdx, t.controlIdx, k, 0, 0, text));
+  d.insertText(0, t.paraIdx + 1, 0, TABLE_SAMPLE.closing);
+
+  // 안쪽 표: 본문 끝에 임시 표를 만들어 복사한 뒤 "홍길동" 칸에 붙이고 임시 표는 지운다.
+  const tail = d.getParagraphCount(0) - 1;
+  d.splitParagraph(0, tail, d.getParagraphLength(0, tail));
+  const tmp = JSON.parse(d.createTable(0, tail + 1, 0, 1, 2)) as { paraIdx: number; controlIdx: number };
+  d.insertTextInCell(0, tmp.paraIdx, tmp.controlIdx, 0, 0, 0, '동행');
+  d.insertTextInCell(0, tmp.paraIdx, tmp.controlIdx, 1, 0, 0, '오랫만에 가요');
+  d.copyControl(0, tmp.paraIdx, '', tmp.controlIdx);
+  d.pasteInternalInCell(0, t.paraIdx, t.controlIdx, 1, 0, 0);
+  d.deleteTableControl(0, tmp.paraIdx, tmp.controlIdx);
+
+  if (opts.sizes) d.applyCharFormatInCell(0, t.paraIdx, t.controlIdx, 0, 0, 0, 2, JSON.stringify({ fontSize: 1600, bold: true }));
+  const bytes = format === 'hwpx' ? d.exportHwpx() : d.exportHwp();
+  return { name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) };
+}
