@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, type Page } from '@playwright/test';
 
 export interface Upload {
@@ -59,4 +60,25 @@ export function makePdf(pages: string[]): Upload {
 export async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   const m = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
   expect(m.scroll, `가로 넘침: ${JSON.stringify(m)}`).toBeLessThanOrEqual(m.inner);
+}
+
+/** 내려받기를 눌러(선택지가 여러 개면 item 에 맞는 항목을 골라) 받은 파일을 읽는다. */
+export async function downloadAs(page: Page, item?: RegExp): Promise<{ name: string; bytes: Buffer }> {
+  const trigger = page.getByRole('button', { name: '내려받기' });
+  if (item) {
+    await trigger.click();
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('menuitem', { name: item }).click()]);
+    return { name: dl.suggestedFilename(), bytes: readFileSync((await dl.path())!) };
+  }
+  const [dl] = await Promise.all([page.waitForEvent('download'), trigger.click()]);
+  return { name: dl.suggestedFilename(), bytes: readFileSync((await dl.path())!) };
+}
+
+/** AI 대화에서 요청을 보낸다. 처음이면 나오는 동의 창은 동의한다. */
+export async function askAi(page: Page, text: string): Promise<void> {
+  await page.getByRole('tab', { name: /AI 대화/ }).click();
+  await page.getByLabel('AI에게 시키기').fill(text);
+  await page.getByRole('button', { name: '보내기' }).click();
+  const dialog = page.getByRole('dialog');
+  if (await dialog.isVisible().catch(() => false)) await dialog.getByRole('button', { name: '동의하고 계속' }).click();
 }

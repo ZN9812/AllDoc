@@ -308,12 +308,44 @@
   background: #fff;
 }
 
+/* 쪽은 화면 너비에 맞춰 줄어들 뿐 넘치지 않는다. 쪽을 감싸는 상자만 좌우로 넘치므로 가로 스크롤은 막는다. */
 .docx-engine {
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .docx-mount {
   min-height: 100%;
+}
+
+/* Word 편집기(SuperDoc)의 도구줄은 도구줄 칸을 가득 채워야 남는 너비를 재서 넘치는 도구를 알맞게 접는다. */
+.docx-toolbar {
+  flex: 1;
+  min-width: 0;
+  --sd-ui-toolbar-padding-x: 0px;
+}
+
+/* SuperDoc 의 화면 요소(도구줄, 펼침 메뉴, 찾기 창 등)가 이 앱의 색과 글꼴을 따르게 한다. 문서 종이는 두 테마 모두 흰색 그대로 둔다.
+   변수는 SuperDoc 쪽에서 :root 에 정의되고 나중에 불러오므로, 우선순위를 높여 덮어쓴다. */
+:root[data-theme] {
+  --sd-ui-font-family: var(--font);
+  --sd-ui-text: var(--ink);
+  --sd-ui-text-muted: var(--muted);
+  --sd-ui-bg: var(--chrome);
+  --sd-ui-hover-bg: var(--fill);
+  --sd-ui-active-bg: var(--hot);
+  --sd-ui-border: var(--line);
+  --sd-ui-action: var(--accent);
+  --sd-ui-action-hover: var(--accent);
+  --sd-ui-action-text: var(--on-accent);
+  /* 문서 종이는 두 테마 모두 흰색(SuperDoc 은 종이 색도 --sd-ui-bg 에서 가져오므로 따로 지정한다). */
+  --sd-layout-page-bg: #ffffff;
+  --sd-surface-page: #ffffff;
+}
+
+/* 쪽이 가운데에 놓이도록 한다(SuperDoc 은 왼쪽에 붙여 그린다). */
+.docx-engine .superdoc {
+  justify-content: center;
 }
 
 /* ---- 반응형: 좁은 화면에서는 쪽 목록을 접는다 ---- */
@@ -327,6 +359,17 @@
   .tb {
     min-width: 36px;
     height: 36px;
+  }
+
+  /* 손가락으로 누르기 쉽도록 Word 도구줄의 칸을 키운다(기본 30×32px). 칸이 커진 만큼 덜 들어가는 도구는 "⋮" 메뉴로 접힌다. */
+  .docx-toolbar {
+    --sd-ui-toolbar-item-padding: 8px;
+    --sd-ui-toolbar-height: 40px;
+  }
+
+  /* 도구마다 그림 너비가 달라서(굵게는 12px) 칸 너비도 달라지므로 최소 너비를 둔다. SuperDoc 쪽 규칙과 우선순위가 같아 한 단계 더 높인다. */
+  .tools .docx-toolbar .sd-toolbar-item {
+    min-width: 36px;
   }
 
   .canvas {

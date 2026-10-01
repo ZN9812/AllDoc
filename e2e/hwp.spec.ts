@@ -1,23 +1,8 @@
-import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
-import { loginAs, openFile, unique } from './helpers';
+import { askAi, downloadAs, loginAs, openFile, unique } from './helpers';
 import { makeHwp, readHwp, SAMPLE_LINES } from './hwp-fixtures';
 
 const studio = (page: Page) => page.frameLocator('.hwp-host iframe');
-
-async function downloadAs(page: Page, item: RegExp): Promise<{ name: string; bytes: Buffer }> {
-  await page.getByRole('button', { name: '내려받기' }).click();
-  const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('menuitem', { name: item }).click()]);
-  return { name: dl.suggestedFilename(), bytes: readFileSync((await dl.path())!) };
-}
-
-async function askAi(page: Page, text: string): Promise<void> {
-  await page.getByRole('tab', { name: /AI 대화/ }).click();
-  await page.getByLabel('AI에게 시키기').fill(text);
-  await page.getByRole('button', { name: '보내기' }).click();
-  const dialog = page.getByRole('dialog');
-  if (await dialog.isVisible().catch(() => false)) await dialog.getByRole('button', { name: '동의하고 계속' }).click();
-}
 
 test.describe('한글(HWP·HWPX) 문서', () => {
   test('HWP 를 열면 한글 편집기(메뉴·도구줄)와 문서가 보인다', async ({ page }) => {

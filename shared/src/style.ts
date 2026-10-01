@@ -11,6 +11,8 @@ export const CharStyleSchema = z.object({
   underline: z.boolean().optional(),
   /** 되돌리기용: 언어별 글꼴 7칸. 편집기 연결부가 만들며 AI 는 쓰지 않는다. */
   fontFaces: z.array(z.string()).length(7).optional(),
+  /** 되돌리기용: DOCX 의 글꼴 칸(영문·한글(동아시아) 등). 편집기 연결부가 만들며 AI 는 쓰지 않는다. */
+  rawFonts: z.object({ ascii: z.string().optional(), hAnsi: z.string().optional(), eastAsia: z.string().optional(), cs: z.string().optional() }).optional(),
 });
 export type CharStyle = z.infer<typeof CharStyleSchema>;
 

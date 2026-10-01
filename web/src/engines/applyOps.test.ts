@@ -1,4 +1,4 @@
-import type { Op } from '@alldoc/shared';
+import { textGuard, type Op } from '@alldoc/shared';
 import { describe, expect, it } from 'vitest';
 import { applyAtomic, stale, type OneResult } from './applyOps';
 
@@ -46,5 +46,55 @@ describe('변경 묶음 적용', () => {
   it('변경이 없으면 성공이고 되돌릴 것도 없다', async () => {
     const c = counter(0);
     expect(await applyAtomic(c.applyOne, [])).toEqual({ ok: true, inverse: [] });
+  });
+});
+
+/** 문단 글을 들고 있고, 변경 때 지문(guard)을 확인하는 대상. 글을 바꾸면 되돌릴 변경에 "바뀐 글의 지문"을 담는다. */
+function paragraphs(texts: string[]) {
+  const cur = [...texts];
+  const applyOne = async (op: Op): Promise<OneResult> => {
+    if (op.type !== 'replaceText') return stale('unsupported');
+    const text = cur[op.paragraph] as string;
+    if (op.guard !== undefined && op.guard !== textGuard(text)) return stale('지문이 달라요');
+    const at = text.indexOf(op.find);
+    if (at < 0) return stale('글을 찾을 수 없어요');
+    cur[op.paragraph] = text.slice(0, at) + op.replace + text.slice(at + op.find.length);
+    return { ok: true, inverse: { type: 'replaceText', paragraph: op.paragraph, find: op.replace, replace: op.find, guard: textGuard(cur[op.paragraph] as string) } };
+  };
+  return { applyOne, cur };
+}
+const swap = (paragraph: number, find: string, replace: string, text: string): Op => ({ type: 'replaceText', paragraph, find, replace, guard: textGuard(text) });
+
+describe('같은 문단을 여러 번 고치는 묶음', () => {
+  const ORIGINAL = '몇일 뒤에 할려고 해요';
+
+  it('앞의 변경으로 글이 바뀌어도 뒤쪽 변경이 지문 때문에 거절되지 않는다', async () => {
+    const t = paragraphs([ORIGINAL]);
+    const r = await applyAtomic(t.applyOne, [swap(0, '몇일', '며칠', ORIGINAL), swap(0, '할려고', '하려고', ORIGINAL)]);
+    expect(r.ok).toBe(true);
+    expect(t.cur[0]).toBe('며칠 뒤에 하려고 해요');
+  });
+
+  it('돌려받은 역변경으로 처음 글로 돌아간다', async () => {
+    const t = paragraphs([ORIGINAL]);
+    const r = await applyAtomic(t.applyOne, [swap(0, '몇일', '며칠', ORIGINAL), swap(0, '할려고', '하려고', ORIGINAL)]);
+    if (!r.ok) throw new Error('적용 실패');
+    const back = await applyAtomic(t.applyOne, r.inverse);
+    expect(back.ok).toBe(true);
+    expect(t.cur[0]).toBe(ORIGINAL);
+  });
+
+  it('다른 문단의 지문은 건드리지 않는다', async () => {
+    const t = paragraphs([ORIGINAL, '다른 문단']);
+    const r = await applyAtomic(t.applyOne, [swap(0, '몇일', '며칠', ORIGINAL), swap(1, '다른', '또 다른', '다른 문단')]);
+    expect(r.ok).toBe(true);
+    expect(t.cur).toEqual(['며칠 뒤에 할려고 해요', '또 다른 문단']);
+  });
+
+  it('처음부터 지문이 맞지 않는 변경은 여전히 거절한다(문서가 이미 바뀐 경우)', async () => {
+    const t = paragraphs(['이미 바뀐 글입니다']);
+    const r = await applyAtomic(t.applyOne, [swap(0, '바뀐', '고친', ORIGINAL)]);
+    expect(r).toMatchObject({ ok: false, reason: 'stale' });
+    expect(t.cur[0]).toBe('이미 바뀐 글입니다');
   });
 });
