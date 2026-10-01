@@ -157,3 +157,35 @@ describe('기준 문서', () => {
     expect(compareToProfile(reference, profile)).toEqual([]);
   });
 });
+
+describe('표 칸 안의 문단은 서식 비교에서 뺀다', () => {
+  const cell = (text: string, char: ParagraphInfo['char'], index: number): ParagraphInfo => ({ index, text, char, para: {}, cell: { table: 1, row: 1, col: 1, depth: 1 } });
+
+  it('본문은 서식이 같고 표 칸만 다르면 지적하지 않는다(제목 칸이 본문과 다른 건 정상이다)', () => {
+    const body = [0, 1, 2, 3, 4, 5].map((i) => para(`본문 문장 ${i}`, { fontFamily: '맑은 고딕', fontSizePt: 11 }, {}, i));
+    // 표 칸 6개: 한 칸만 크기가 다르다. 본문과 한데 묶었다면 이 칸을 "다른 곳"으로 지적했을 것이다.
+    const cells = [6, 7, 8, 9, 10, 11].map((i) => cell(`칸 ${i}`, { fontFamily: '맑은 고딕', fontSizePt: i === 8 ? 16 : 11 }, i));
+    const r = analyzeConsistency(doc([...body, ...cells]));
+    expect(r.findings).toEqual([]);
+  });
+
+  it('본문에서 찾은 지적의 번호는 표 칸에 밀리지 않는다', () => {
+    const body = [0, 1, 2, 3, 4, 5].map((i) => para(`본문 문장 ${i}`, { fontFamily: '맑은 고딕', fontSizePt: i === 4 ? 14 : 11 }, {}, i));
+    const cells = [6, 7].map((i) => cell(`칸 ${i}`, { fontFamily: '굴림', fontSizePt: 9 }, i));
+    const f = analyzeConsistency(doc([...body, ...cells])).findings.find((x) => x.attr === 'fontSizePt');
+    expect(f?.paragraphs).toEqual([4]);
+  });
+
+  it('기준 문서의 서식 뽑기와 기준에 맞추기도 표 칸을 건드리지 않는다', () => {
+    const refBody = [0, 1, 2, 3].map((i) => para(`기준 본문 ${i}`, { fontFamily: '바탕', fontSizePt: 12 }, {}, i));
+    const profile = buildProfile(doc([...refBody, cell('표 안 글', { fontFamily: '굴림', fontSizePt: 8 }, 4)]), '기준.hwp');
+    expect(profile.groups).toHaveLength(1);
+    expect(profile.groups[0]?.count).toBe(4); // 표 칸 글은 세지 않는다
+    expect(profile.groups[0]?.char).toMatchObject({ fontFamily: '바탕', fontSizePt: 12 });
+
+    const mine = [para('내 본문', { fontFamily: '맑은 고딕', fontSizePt: 10 }, {}, 0), cell('내 표 칸', { fontFamily: '굴림', fontSizePt: 8 }, 1)];
+    const proposals = compareToProfile(doc(mine), profile);
+    expect(proposals.length).toBeGreaterThan(0);
+    expect(proposals.flatMap((p) => p.ops.map((o) => o.paragraph))).toEqual(expect.not.arrayContaining([1]));
+  });
+});

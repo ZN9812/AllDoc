@@ -41,7 +41,7 @@ async function studioInstalled(): Promise<boolean> {
 const failed = (message: string): ApplyFailure => ({ ok: false, reason: 'failed', message });
 
 /** HWP·HWPX: 화면은 자체 호스팅한 한글 편집기(rhwp-studio), AI 의 문단·서식 읽기와 고치기는 화면 없는 코어가 맡는다. */
-export default function HwpEngine({ doc, onReady, onDirty, onPages, onError }: EngineProps) {
+export default function HwpEngine({ doc, onReady, onDirty, onPages, onError, onNotice }: EngineProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -179,12 +179,17 @@ export default function HwpEngine({ doc, onReady, onDirty, onPages, onError }: E
           },
           // 편집기 화면은 별도 문서(iframe)라서 AI 가 고칠 곳을 문서 위에 겹쳐 표시하지는 못한다. 변경 내역 카드로 확인하고,
           // "문서에서 보기"를 누르면 편집기가 그 문단으로 이동한다.
+          // 편집기는 본문 문단으로만 이동할 수 있어서, 표 안의 문단은 그 표가 놓인 본문 문단으로 이동하고 그렇다고 알린다.
           setHighlights: () => undefined,
           reveal: (t) => {
             void (async () => {
               try {
                 const loc = (await sync()).paragraphTarget(t.paragraph);
-                if (loc) await (studio as RhwpEditor).focusTarget({ kind: 'body_paragraph', section: loc.section, paragraph: loc.paragraph, charOffset: 0, length: loc.length });
+                if (!loc) return;
+                const r = await (studio as RhwpEditor).focusTarget({ kind: 'body_paragraph', section: loc.section, paragraph: loc.paragraph, charOffset: 0, length: loc.length });
+                if (loc.inTable) {
+                  onNotice?.(r.focused ? '표 안의 글이에요. 한글 편집기가 칸으로 바로 이동하지는 못해서, 그 표가 있는 곳으로 이동했어요. 카드에 적힌 행·열을 보세요.' : '표가 있는 곳으로 이동하지 못했어요. 카드에 적힌 표·행·열을 보고 직접 찾아 주세요.');
+                }
               } catch {
                 // 위치를 보여 주지 못해도 편집에는 영향이 없다.
               }

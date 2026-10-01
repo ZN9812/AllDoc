@@ -70,4 +70,6 @@ export interface EngineProps {
   onDirty(): void;
   onPages(pages: PagesApi | null): void;
   onError(message: string): void;
+  /** 사용자에게 잠깐 알릴 안내(예: "표 안의 글이라 그 표가 있는 곳으로 이동했어요"). 없어도 동작한다. */
+  onNotice?(message: string): void;
 }

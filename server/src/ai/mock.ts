@@ -24,6 +24,9 @@ function josaOf(word: string, kind: 'eunNeun' | 'euro' | 'iGa' | 'eulReul'): str
   return f(word).slice(word.length);
 }
 
+/** 서식 규칙은 표 칸 안의 문단에는 적용하지 않는다(실제 AI 에게도 같은 원칙을 프롬프트로 알린다). 맞춤법은 표 안에도 적용한다. */
+const outsideTables = (doc: DocSummary) => doc.paragraphs.filter((p) => !p.cell);
+
 const blankOp: RawOp = {
   type: 'replaceText',
   paragraph: 0,
@@ -76,17 +79,17 @@ function rulesProposals(doc: DocSummary, rules: string): RawProposal[] {
   const spacing = /줄\s*간격\s*(\d+)\s*%/.exec(rules)?.[1];
 
   if (font) {
-    const ops = doc.paragraphs.filter((p) => p.char.fontFamily && p.char.fontFamily !== font).map((p) => ({ ...blankOp, type: 'setCharStyle' as const, paragraph: p.index, fontFamily: font }));
+    const ops = outsideTables(doc).filter((p) => p.char.fontFamily && p.char.fontFamily !== font).map((p) => ({ ...blankOp, type: 'setCharStyle' as const, paragraph: p.index, fontFamily: font }));
     if (ops.length > 0) out.push({ category: 'format', title: `글꼴을 ${euro(font)}`, description: `규칙에 적힌 글꼴과 다른 문단 ${ops.length}곳을 맞춥니다.`, before: '다른 글꼴', after: font, ops });
   }
   if (size) {
     const pt = Number(size);
-    const ops = doc.paragraphs.filter((p) => p.char.fontSizePt != null && p.char.fontSizePt !== pt).map((p) => ({ ...blankOp, type: 'setCharStyle' as const, paragraph: p.index, fontSizePt: pt }));
+    const ops = outsideTables(doc).filter((p) => p.char.fontSizePt != null && p.char.fontSizePt !== pt).map((p) => ({ ...blankOp, type: 'setCharStyle' as const, paragraph: p.index, fontSizePt: pt }));
     if (ops.length > 0) out.push({ category: 'format', title: `글자 크기를 ${pt}pt로`, description: `규칙에 적힌 크기와 다른 문단 ${ops.length}곳을 맞춥니다.`, before: '다른 크기', after: `${pt}pt`, ops });
   }
   if (spacing) {
     const pct = Number(spacing);
-    const ops = doc.paragraphs.filter((p) => p.para.lineSpacingPct != null && p.para.lineSpacingPct !== pct).map((p) => ({ ...blankOp, type: 'setParaStyle' as const, paragraph: p.index, lineSpacingPct: pct }));
+    const ops = outsideTables(doc).filter((p) => p.para.lineSpacingPct != null && p.para.lineSpacingPct !== pct).map((p) => ({ ...blankOp, type: 'setParaStyle' as const, paragraph: p.index, lineSpacingPct: pct }));
     if (ops.length > 0) out.push({ category: 'format', title: `줄 간격을 ${pct}%로`, description: `규칙에 적힌 줄 간격과 다른 문단 ${ops.length}곳을 맞춥니다.`, before: '다른 간격', after: `${pct}%`, ops });
   }
   return out;

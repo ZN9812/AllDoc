@@ -60,6 +60,13 @@ function Card({ item }: { item: ProposalItem }) {
         <b>{p.title}</b>
         <span className="chip">{CATEGORY_LABEL[p.category]}</span>
       </div>
+      {p.place && (
+        <div className="where">
+          <span className="chip" data-testid="proposal-place">
+            {p.place}
+          </span>
+        </div>
+      )}
       <p>{p.description}</p>
       <div className="diff">
         <span className="from">{p.before}</span>

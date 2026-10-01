@@ -95,6 +95,7 @@ export default function EditorPage({ id }: { id: string }) {
 
   const onReady = useCallback((h: EngineHandle) => useEditor.getState().setEngine(h), []);
   const onPages = useCallback((p: PagesApi | null) => useEditor.getState().setPages(p), []);
+  const onNotice = useCallback((message: string) => toast(message), []);
 
   // 탭을 닫거나 숨길 때, 화면을 떠날 때 마지막 변경을 저장한다.
   useEffect(() => {
@@ -159,7 +160,7 @@ export default function EditorPage({ id }: { id: string }) {
             ) : (
               <EngineBoundary>
                 <Suspense fallback={<div className="engine-loading">편집기를 불러오는 중…</div>}>
-                  <Engine doc={doc} toolsHost={toolsHost} onReady={onReady} onDirty={onDirty} onPages={onPages} onError={setEngineError} />
+                  <Engine doc={doc} toolsHost={toolsHost} onReady={onReady} onDirty={onDirty} onPages={onPages} onError={setEngineError} onNotice={onNotice} />
                 </Suspense>
               </EngineBoundary>
             )}

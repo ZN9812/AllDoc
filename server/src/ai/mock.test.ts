@@ -53,3 +53,27 @@ describe('데모 AI', () => {
     expect(r.reply).toContain('서식을 바꿀 수 없어요');
   });
 });
+
+describe('데모 AI와 표 칸 안의 글', () => {
+  const mock = new MockProvider();
+  const cell = { table: 1, row: 1, col: 1, depth: 1 };
+  const document = {
+    kind: 'hwp' as const,
+    paragraphs: [
+      { index: 0, text: '본문 몇일 뒤', char: { fontFamily: '굴림', fontSizePt: 12 }, para: { lineSpacingPct: 150 } },
+      { index: 3, text: '표 칸 몇일 뒤', char: { fontFamily: '굴림', fontSizePt: 12 }, para: { lineSpacingPct: 150 }, cell },
+    ],
+  };
+
+  it('맞춤법은 표 칸 안의 글에도 적용한다', async () => {
+    const r = await mock.propose({ request: req({ document }) });
+    const typo = r.proposals.find((p) => p.title === '"몇일" 고치기');
+    expect(typo?.ops.map((o) => o.paragraph)).toEqual([0, 3]);
+  });
+
+  it('서식 규칙(내 규칙)은 표 밖 문단에만 적용한다', async () => {
+    const r = await mock.propose({ request: req({ mode: 'format_check', criteria: 'rules', rulesText: '본문은 맑은 고딕 11pt, 줄 간격 160%', document }) });
+    expect(r.proposals.length).toBe(3); // 글꼴, 크기, 줄 간격
+    for (const p of r.proposals) expect(p.ops.map((o) => o.paragraph)).toEqual([0]);
+  });
+});

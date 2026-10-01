@@ -9,7 +9,7 @@ import { useSettings } from '../state/settings';
 import { toast } from '../state/toast';
 import { ApiError, postPropose } from './client';
 import { analyzeConsistency, buildProfile, compareToProfile } from './consistency';
-import { attachGuards } from './guards';
+import { attachGuards, attachPlaces } from './guards';
 
 const totalChars = (s: DocSummary): number => s.paragraphs.reduce((n, p) => n + p.text.length, 0);
 
@@ -61,7 +61,7 @@ async function callAi(opts: CallOptions, userMessage: string): Promise<boolean> 
 
     const res = await postPropose({ ...opts, document, history });
     useAuth.getState().setQuota(res.quota);
-    const added = useEditor.getState().addProposals(attachGuards(res.proposals, document));
+    const added = useEditor.getState().addProposals(attachPlaces(attachGuards(res.proposals, document), document));
     useEditor.getState().pushMsg({
       role: 'assistant',
       content: res.reply,
