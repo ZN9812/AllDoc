@@ -119,6 +119,8 @@ set -a; . ./.env; set +a
 NODE_ENV=production npm start
 ```
 
+운영 모드(`NODE_ENV=production`)에서는 서버가 `.env`를 직접 읽지 않으므로, 위처럼 값을 환경에 먼저 넣어야 합니다(개발 모드에서는 `.env`를 자동으로 읽습니다).
+
 서버는 의존성을 포함해 `server/dist/main.js` 하나로 묶여 있고, 웹 파일은 `web/dist`를 읽습니다(`WEB_DIST`로 위치를 바꿀 수 있습니다). SQLite는 Node.js 내장 모듈이라 따로 설치할 것이 없습니다.
 systemd로 띄운다면 `EnvironmentFile=`에 `.env`를 지정하고 `ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server/dist/main.js`를 쓰세요.
 

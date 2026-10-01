@@ -54,18 +54,28 @@ docs/     명세, 디자인, AI 연결 방법, 배포 방법
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | Docker 배포, 구글 로그인 설정, 공개 전 점검표, 알려진 한계 |
 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | 가져다 쓴 소프트웨어와 라이선스 |
 
-## 개발 환경에서 실행
+## 처음 한 번 실행해 보기
 
-필요한 것: Node.js 22.13 이상, git(처음 한 번 한글 편집기 소스를 받습니다).
+필요한 것: Node.js 22.13 이상, git(처음 한 번 한글 편집기 소스를 받습니다. GitHub에 나갈 수 있어야 합니다).
 
 ```bash
 npm install
-cp .env.example .env     # 처음에는 AUTH_MODE=dev, AI_PROVIDER=mock 으로 시험할 수 있습니다.
+cp .env.example .env     # 복사한 .env 에서 AUTH_MODE=dev, AI_PROVIDER=mock 두 줄만 고치면 됩니다(Windows 명령 프롬프트는 copy).
+npm run build            # 웹·서버·한글 편집기를 만듭니다(처음에는 몇 분 걸립니다).
+npm start                # 브라우저로 http://localhost:8787 을 여세요.
+```
+
+- `AUTH_MODE=dev`는 가짜 로그인, `AI_PROVIDER=mock`은 실제 AI 없이 정해진 예시 제안만 돌려주는 데모입니다. 진짜 Claude를 쓰려면 [`docs/AI.md`](docs/AI.md).
+- 서버는 `.env`를 **개발·시험용으로만** 자동으로 읽습니다. 운영(`NODE_ENV=production`)에서는 읽지 않고, 명령에서 준 환경 변수(`AUTH_MODE=none npm start` 등)가 `.env`보다 앞섭니다.
+
+코드를 고치며 개발할 때는 서버와 웹을 따로 띄웁니다(같은 `.env`를 씁니다).
+
+```bash
 npm run dev:server       # http://localhost:8787
 npm run dev:web          # http://localhost:5173 (/api 는 서버로 전달)
 ```
 
-`npm run dev:web`은 처음 실행할 때 한글 편집기(rhwp-studio)를 받아 빌드합니다(GitHub에 나갈 수 있어야 합니다. 실패하면 경고만 하고 HWP를 뺀 나머지는 쓸 수 있습니다).
+`npm run dev:web`은 처음 실행할 때 한글 편집기(rhwp-studio)를 받아 빌드합니다(실패하면 경고만 하고 HWP를 뺀 나머지는 쓸 수 있습니다).
 
 검사와 시험:
 

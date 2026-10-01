@@ -3,7 +3,12 @@ import { join } from 'node:path';
 import { createApp } from './app';
 import { createProviders } from './ai/providers';
 import { ConfigError, loadConfig } from './config';
+import { loadDotEnv } from './dotenv';
 import { dayKey, QuotaStore } from './quota';
+
+// 설정을 읽기 전에 .env 를 환경 변수로 읽는다(개발·시험용. 운영에서는 읽지 않는다).
+const dotenvFile = loadDotEnv();
+if (dotenvFile) console.log(`.env 를 읽었어요: ${dotenvFile}`);
 
 let config;
 try {
