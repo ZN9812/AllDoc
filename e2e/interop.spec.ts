@@ -90,3 +90,58 @@ test('LibreOffice 로 만든 DOCX 를 고쳐 내려받으면, LibreOffice 가 �
   soffice(dir, ['--convert-to', 'pdf', '--outdir', join(dir, 'pdf'), join(dir, 'edited.docx')]);
   expect(readFileSync(join(dir, 'pdf', 'edited.pdf')).subarray(0, 5).toString()).toBe('%PDF-');
 });
+
+// 머리말·꼬리말(쪽 번호 필드 포함)·각주·미주가 든 문서. 오탈자가 머리말("오랫만"), 본문("몇일"), 각주("되요"), 꼬리말("할려고")에 하나씩 있다.
+const AREAS_FODT = `<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.text">
+ <office:automatic-styles>
+  <style:page-layout style:name="pm1"><style:page-layout-properties fo:page-width="21cm" fo:page-height="29.7cm" fo:margin-top="2cm" fo:margin-bottom="2cm" fo:margin-left="2cm" fo:margin-right="2cm"/><style:header-style/><style:footer-style/></style:page-layout>
+ </office:automatic-styles>
+ <office:master-styles>
+  <style:master-page style:name="Standard" style:page-layout-name="pm1">
+   <style:header><text:p>머리말 오랫만 입니다</text:p></style:header>
+   <style:footer><text:p>꼬리말 할려고 합니다 - <text:page-number text:select-page="current">1</text:page-number></text:p></style:footer>
+  </style:master-page>
+ </office:master-styles>
+ <office:body><office:text>
+  <text:p>휴가 신청서</text:p>
+  <text:p>몇일 동안 쉬겠습니다.<text:note text:id="ftn1" text:note-class="footnote"><text:note-citation>1</text:note-citation><text:note-body><text:p>각주 되요 입니다</text:p></text:note-body></text:note></text:p>
+  <text:p>미주가 달린 문단입니다.<text:note text:id="edn1" text:note-class="endnote"><text:note-citation>i</text:note-citation><text:note-body><text:p>미주 글입니다</text:p></text:note-body></text:note></text:p>
+ </office:text></office:body>
+</office:document>`;
+
+test('LibreOffice 로 만든 DOCX 의 머리말·꼬리말·각주 안의 글을 고쳐 내려받으면, LibreOffice 가 열었을 때 그 글만 고쳐져 있고 쪽 번호 필드와 각주·미주는 그대로다', async ({ page }) => {
+  expect(SOFFICE, 'LibreOffice(soffice)를 찾을 수 없어요. 설치하거나 REQUIRE_SOFFICE 를 빼세요.').not.toBe('');
+  const dir = mkdtempSync(join(tmpdir(), 'alldoc-interop-'));
+  writeFileSync(join(dir, 'areas.fodt'), AREAS_FODT);
+  soffice(dir, ['--convert-to', 'docx:MS Word 2007 XML', '--outdir', dir, join(dir, 'areas.fodt')]);
+  const original = readFileSync(join(dir, 'areas.docx'));
+
+  await loginAs(page);
+  await openFile(page, { name: 'areas.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: original });
+  await askAi(page, '맞춤법');
+  await page.getByRole('button', { name: '변경 내역 보기' }).click();
+  const cards = page.getByTestId('proposal-card');
+  await expect(cards).toHaveCount(4);
+  // LibreOffice 는 각주 번호(w:id)를 2부터 매긴다. 화면에 보이는 번호(1)로 알려 준다.
+  await expect(cards.filter({ hasText: '"되요" 고치기' }).getByTestId('proposal-place')).toHaveText('각주 1');
+  await expect(cards.filter({ hasText: '"오랫만" 고치기' }).getByTestId('proposal-place')).toHaveText('머리말');
+  await expect(cards.filter({ hasText: '"할려고" 고치기' }).getByTestId('proposal-place')).toHaveText('꼬리말');
+  await page.getByRole('button', { name: '전체 적용' }).click();
+  await expect(page.locator('.toast').last()).toContainText('4개를 적용했어요');
+
+  const edited = (await downloadAs(page)).bytes;
+  writeFileSync(join(dir, 'edited.docx'), edited);
+
+  // 제3자 프로그램이 읽는다: 열리고, 머리말·꼬리말·각주·본문의 오탈자가 고쳐져 있고, 쪽 번호 필드와 각주·미주 표시가 남아 있다.
+  soffice(dir, ['--convert-to', 'fodt', '--outdir', join(dir, 'fodt'), join(dir, 'edited.docx')]);
+  const flat = readFileSync(join(dir, 'fodt', 'edited.fodt'), 'utf8');
+  for (const fixed of ['머리말 오랜만 입니다', '꼬리말 하려고 합니다', '각주 돼요 입니다', '며칠 동안 쉬겠습니다', '미주 글입니다']) expect(flat, `${fixed} 가 없어요`).toContain(fixed);
+  for (const typo of ['오랫만', '할려고', '되요', '몇일']) expect(flat, `${typo} 가 남아 있어요`).not.toContain(typo);
+  expect(flat).toContain('<text:page-number'); // 쪽 번호 필드
+  expect(flat.match(/<text:note [^>]*text:note-class="footnote"/g)).toHaveLength(1);
+  expect(flat.match(/<text:note [^>]*text:note-class="endnote"/g)).toHaveLength(1);
+  // PDF 로도 열린다.
+  soffice(dir, ['--convert-to', 'pdf', '--outdir', join(dir, 'pdf'), join(dir, 'edited.docx')]);
+  expect(readFileSync(join(dir, 'pdf', 'edited.pdf')).subarray(0, 5).toString()).toBe('%PDF-');
+});

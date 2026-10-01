@@ -1,6 +1,5 @@
 import type { DocKind } from '@alldoc/shared';
 
-const TABLE_NOTE = '서식 점검(문서 안 일관성·기준 문서)은 표 밖 본문만 비교하고, 표 안의 글은 AI 대화로 고쳐요.';
 const AREA_NOTE = '서식 점검(문서 안 일관성·기준 문서)은 본문(표 밖)만 비교하고, 표·머리말·꼬리말·각주 안의 글은 AI 대화로 고쳐요.';
 const HWP_NOTE = `본문, 표 안의 글, 머리말·꼬리말, 각주·미주를 다뤄요(각주·미주는 글만 고치고 글자 서식은 바꾸지 못해요). 글상자 안의 글과 표 안에 달린 각주는 AI가 읽지 못해요. ${AREA_NOTE}`;
 
@@ -8,7 +7,7 @@ const HWP_NOTE = `본문, 표 안의 글, 머리말·꼬리말, 각주·미주�
 export const COVERAGE_NOTE: Partial<Record<DocKind, string>> = {
   hwp: HWP_NOTE,
   hwpx: HWP_NOTE,
-  docx: `본문과 표 안의 글을 다뤄요. 머리말·꼬리말, 각주 안의 글은 AI가 읽지 못해요. ${TABLE_NOTE}`,
+  docx: `본문, 표 안의 글, 머리말·꼬리말, 각주·미주를 다뤄요. 글상자 안의 글은 AI가 읽지 못해요. ${AREA_NOTE}`,
 };
 
 /** 서식을 읽고 바꾸는 방식에 대한 안내(한글·Word 문서) */

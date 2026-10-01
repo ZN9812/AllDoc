@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CellPlace } from '@alldoc/shared';
 import { makeDocxBytes, type ParaSpec, type TableSpec } from './fixtures';
-import { browserParse, parseDocxParagraphs } from './styles';
+import { browserParse, parseDocxParagraphs, parseNoteOrder, usesEvenAndOddHeaders } from './styles';
 import { decodeUtf8, readZipFiles } from './zip';
 
 async function read(items: Array<ParaSpec | TableSpec>) {
@@ -181,9 +181,41 @@ describe('표 칸 위치 읽기', () => {
     expect(cellOf(paras, '진짜 둘째 표')?.table).toBe(2); // 상자를 품은 표가 1번, 상자 안의 표는 세지 않는다
   });
 
+  it('글상자 안의 문단에는 inTextBox 가 붙고, 그 밖의 문단에는 붙지 않는다', () => {
+    const box = `<w:p><w:r><w:pict><v:shape><v:textbox><w:txbxContent>${run('상자 글')}</w:txbxContent></v:textbox></v:shape></w:pict></w:r></w:p>`;
+    const paras = parse(`${run('앞 문단')}${box}${run('뒤 문단')}`);
+    // 상자를 품은 바깥 문단은 글이 없어 빼고 본다.
+    expect(paras.filter((p) => p.text !== '').map((p) => [p.text, p.inTextBox ?? false])).toEqual([
+      ['앞 문단', false],
+      ['상자 글', true],
+      ['뒤 문단', false],
+    ]);
+  });
+
   it('칸이나 행이 없는 엉터리 표 구조에서도 멈추지 않는다', () => {
     const paras = parse(`<w:tc>${run('행 없는 칸')}</w:tc>${run('본문')}`);
     expect(cellOf(paras, '행 없는 칸')).toBeUndefined();
     expect(paras.map((p) => p.text)).toEqual(['행 없는 칸', '본문']);
+  });
+});
+
+describe('각주·미주 순서와 홀짝 머리말 설정 읽기', () => {
+  const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const doc = (inner: string): string => `<w:document ${W}><w:body>${inner}</w:body></w:document>`;
+
+  it('본문에서 각주·미주 표시가 나오는 순서대로 번호(w:id)를 돌려준다(같은 번호는 한 번만)', () => {
+    const xml = doc(
+      '<w:p><w:r><w:footnoteReference w:id="3"/></w:r><w:r><w:endnoteReference w:id="2"/></w:r></w:p><w:p><w:r><w:footnoteReference w:id="2"/></w:r><w:r><w:footnoteReference w:id="3"/></w:r></w:p>',
+    );
+    expect(parseNoteOrder(xml, browserParse)).toEqual({ footnote: ['3', '2'], endnote: ['2'] });
+    expect(parseNoteOrder(doc('<w:p/>'), browserParse)).toEqual({ footnote: [], endnote: [] });
+  });
+
+  it('설정 파일에 홀수·짝수 쪽 머리말 설정이 켜져 있을 때만 켜짐으로 읽는다', () => {
+    const settings = (inner: string): string => `<w:settings ${W}>${inner}</w:settings>`;
+    expect(usesEvenAndOddHeaders(null, browserParse)).toBe(false);
+    expect(usesEvenAndOddHeaders(settings(''), browserParse)).toBe(false);
+    expect(usesEvenAndOddHeaders(settings('<w:evenAndOddHeaders/>'), browserParse)).toBe(true);
+    expect(usesEvenAndOddHeaders(settings('<w:evenAndOddHeaders w:val="0"/>'), browserParse)).toBe(false);
   });
 });

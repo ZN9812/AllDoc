@@ -49,8 +49,8 @@ export const placeLabel = (c: CellPlace): string => `표 ${c.table} · ${c.row}�
 /** 본문 밖의 글(머리말·꼬리말·각주·미주) 문단이 어디에 있는지. 본문과 표 칸의 문단에는 없다. */
 export const AreaPlaceSchema = z.object({
   kind: z.enum(['header', 'footer', 'footnote', 'endnote']),
-  /** 머리말·꼬리말이 적용되는 쪽(양쪽·짝수 쪽·홀수 쪽) */
-  pages: z.enum(['both', 'even', 'odd']).optional(),
+  /** 머리말·꼬리말이 적용되는 쪽(양쪽·짝수 쪽·홀수 쪽·첫 쪽만) */
+  pages: z.enum(['both', 'even', 'odd', 'first']).optional(),
   /** 각주·미주 번호(1부터, 문서에 달린 순서) */
   number: z.number().int().min(1).optional(),
   /** 구역 번호(1부터). 구역이 둘 이상인 문서에서만 붙는다. */
@@ -59,7 +59,7 @@ export const AreaPlaceSchema = z.object({
 export type AreaPlace = z.infer<typeof AreaPlaceSchema>;
 
 const AREA_NAME: Record<AreaPlace['kind'], string> = { header: '머리말', footer: '꼬리말', footnote: '각주', endnote: '미주' };
-const PAGES_NAME: Record<NonNullable<AreaPlace['pages']>, string> = { both: '', even: '짝수 쪽', odd: '홀수 쪽' };
+const PAGES_NAME: Record<NonNullable<AreaPlace['pages']>, string> = { both: '', even: '짝수 쪽', odd: '홀수 쪽', first: '첫 쪽' };
 
 /** 영역의 이름만(번호·쪽 없이). 예: "각주" */
 export const areaName = (a: AreaPlace): string => AREA_NAME[a.kind];

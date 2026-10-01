@@ -17,6 +17,6 @@ export async function summarizeDocxBlob(blob: Blob): Promise<DocSummary> {
   const paras = parseDocxParagraphs(decodeUtf8(documentXml), stylesXml ? decodeUtf8(stylesXml) : null, browserParse);
   return {
     kind: 'docx',
-    paragraphs: paras.flatMap((p, index) => (p.text.trim() === '' ? [] : [{ index, text: p.text, char: p.char, para: p.para, ...(p.cell ? { cell: p.cell } : {}) }])),
+    paragraphs: paras.flatMap((p, index) => (p.text.trim() === '' || p.inTextBox ? [] : [{ index, text: p.text, char: p.char, para: p.para, ...(p.cell ? { cell: p.cell } : {}) }])),
   };
 }

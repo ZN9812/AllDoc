@@ -42,6 +42,11 @@ describe('summarizeDocxBlob (기준 문서 읽기)', () => {
     expect(bodyGroup).toMatchObject({ count: 3, char: { fontFamily: '바탕', fontSizePt: 10 } });
   });
 
+  it('글상자 안의 문단은 기준 서식에 넣지 않는다', async () => {
+    const s = await summarizeDocxBlob(blobOf(makeDocxBytes([{ text: '본문 하나', sizePt: 10, textBox: { text: '상자 안 글', sizePt: 30 } }, { text: '본문 둘', sizePt: 10 }])));
+    expect(s.paragraphs.map((p) => p.text)).toEqual(['본문 하나', '본문 둘']);
+  });
+
   it('DOCX 가 아닌 파일은 알아듣기 쉬운 말로 거절한다', async () => {
     await expect(summarizeDocxBlob(new Blob(['이건 Word 파일이 아니에요']))).rejects.toThrow('Word(DOCX) 문서가 아니거나 깨져 있어요');
   });

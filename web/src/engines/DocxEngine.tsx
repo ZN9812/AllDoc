@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { SuperDoc } from 'superdoc';
 import 'superdoc/style.css';
-import { KIND_MIME } from '@alldoc/shared';
+import { areaLabel, KIND_MIME, type AreaPlace } from '@alldoc/shared';
 import { describeLoadFailure } from './docx/errors';
 import { resolveSpans, type Span } from './docx/highlights';
 import { createLine } from './docx/line';
@@ -12,13 +12,13 @@ import type { EngineHandle, EngineProps, HighlightState, HighlightTarget } from 
 const DOCX_MIME = KIND_MIME.docx;
 
 /** Word(DOCX): 화면과 편집은 SuperDoc, AI 의 문단·서식 읽기와 고치기는 SuperDoc 의 문서 API 로 한다. */
-export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, onError }: EngineProps) {
+export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, onError, onNotice }: EngineProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState<string | null>(null);
   // 콜백은 매번 새로 만들어지므로, 편집기를 다시 만들지 않도록 최신 것을 따로 들고 있는다.
-  const callbacks = useRef({ onReady, onDirty, onError });
-  callbacks.current = { onReady, onDirty, onError };
+  const callbacks = useRef({ onReady, onDirty, onError, onNotice });
+  callbacks.current = { onReady, onDirty, onError, onNotice };
 
   useEffect(() => {
     onPages(null);
@@ -39,12 +39,18 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
     };
 
     // ---- AI 가 고칠 곳을 문서 위에 겹쳐 그린다 ----
-    // 문단 번호를 글 범위로 바꾸는 데 쓰는 블록 목록. 문서가 바뀌면 비워서 다음에 다시 읽는다.
+    // 문단 번호를 글 범위로 바꾸는 데 쓰는 블록 목록(본문 뒤에 머리말·꼬리말·각주·미주 문단이 이어진다). 문서가 바뀌면 비워서 다음에 다시 읽는다.
     let blocks: BlockLike[] | null = null;
+    // 블록 목록을 읽는 함수와 본문 밖 문단의 위치 문구를 만드는 함수. 편집기가 준비되면 정해진다.
+    let readBlocks: (() => Promise<BlockLike[]>) | null = null;
+    let placeOf: ((area: NonNullable<BlockLike['area']>) => AreaPlace) | null = null;
     let hl: HighlightState = { pending: [], focus: [] };
     let spans: { pending: Span[]; focus: Span[] } = { pending: [], focus: [] };
     let refreshSeq = 0;
     let off: (() => void) | undefined;
+
+    /** 편집기에 글 범위를 알릴 때의 주소. 머리말·각주 같은 본문 밖의 글은 그 이야기(story)를 함께 적는다. */
+    const addressOf = (sp: Span) => ({ kind: 'text' as const, blockId: sp.blockId, range: { start: sp.start, end: sp.end }, ...(sp.story ? { story: sp.story } : {}) });
 
     const paint = () => {
       const ui = sd?.ui;
@@ -53,7 +59,7 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
       const frag = document.createDocumentFragment();
       const draw = (list: Span[], kind: 'pending' | 'focus') => {
         for (const sp of list) {
-          const res = ui.viewport.getRect({ target: { kind: 'text', blockId: sp.blockId, range: { start: sp.start, end: sp.end } } });
+          const res = ui.viewport.getRect({ target: addressOf(sp) });
           // 화면 밖의 쪽은 그려져 있지 않아 찾을 수 없다. 스크롤하면 편집기가 알려 주므로 그때 다시 그린다.
           if (!res.found) continue;
           for (const r of res.rects) {
@@ -69,7 +75,7 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
       layer.replaceChildren(frag);
     };
 
-    const refresh = async (api: DocxHost['doc']) => {
+    const refresh = async () => {
       const seq = ++refreshSeq;
       if (hl.pending.length === 0 && hl.focus.length === 0) {
         spans = { pending: [], focus: [] };
@@ -77,7 +83,7 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
         return;
       }
       try {
-        blocks ??= (await api.extract({})).blocks;
+        if (!blocks && readBlocks) blocks = await readBlocks();
       } catch {
         return;
       }
@@ -87,12 +93,18 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
     };
 
     /** 사용자가 "문서에서 보기"를 눌렀을 때: 그 곳이 화면 가운데 오도록 스크롤한다. */
-    const reveal = async (api: DocxHost['doc'], t: HighlightTarget) => {
+    const reveal = async (t: HighlightTarget) => {
       try {
-        blocks ??= (await api.extract({})).blocks;
-        const sp = resolveSpans([t], blocks)[0];
+        if (!blocks && readBlocks) blocks = await readBlocks();
+        const sp = blocks ? resolveSpans([t], blocks)[0] : undefined;
         if (!sp || !alive) return;
-        await sd?.ui.viewport.scrollIntoView({ target: { kind: 'text', blockId: sp.blockId, range: { start: sp.start, end: sp.end } }, block: 'center', behavior: 'smooth' });
+        const moved = await sd?.ui.viewport.scrollIntoView({ target: addressOf(sp), block: 'center', behavior: 'smooth' });
+        // 머리말·꼬리말·각주·미주 안의 글은 편집기가 그 자리로 이동하지 못할 수 있다(그 쪽이 화면에 그려져 있지 않을 때 등). 그러면 헤매지 않게 알려 준다.
+        const area = blocks?.[t.paragraph]?.area;
+        if (area && moved?.success !== true && sd?.ui.viewport.getRect({ target: addressOf(sp) }).found !== true) {
+          const where = placeOf ? areaLabel(placeOf(area)) : '머리말·꼬리말·각주';
+          callbacks.current.onNotice?.(`이 글은 ${where}에 있어요. Word 편집기가 그 자리로 바로 이동하지 못했어요. 해당 쪽을 열어 직접 찾아 주세요.`);
+        }
       } catch {
         // 위치를 보여 주지 못해도 편집에는 영향이 없다.
       }
@@ -131,6 +143,8 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
           // (model 안에서는 줄을 거치지 않는 rawExport 를 쓴다. 줄 안에서 줄을 다시 기다리면 영영 끝나지 않는다.)
           const inLine = createLine();
           const exportDocx = (): Promise<Blob> => inLine(rawExport);
+          readBlocks = () => inLine(() => model.blocks());
+          placeOf = (area) => model.placeOf(area);
           const handle: EngineHandle = {
             kind: 'docx',
             canFormat: true,
@@ -151,9 +165,9 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
               }),
             setHighlights: (state) => {
               hl = state;
-              void refresh(api);
+              void refresh();
             },
-            reveal: (t) => void reveal(api, t),
+            reveal: (t) => void reveal(t),
           };
           // 쪽이 그려지거나 스크롤·확대·다시 배치가 있을 때마다 편집기가 알려 준다 → 고칠 곳을 다시 그린다.
           off = superdoc.ui.viewport.observe(paint);

@@ -257,8 +257,8 @@ test.describe('Word(DOCX) 문서', () => {
     await openFile(page, makeDocx());
     await page.getByRole('tab', { name: /서식 점검/ }).click();
     const note = page.getByTestId('coverage-note');
-    await expect(note).toContainText('본문과 표 안의 글을 다뤄요');
-    await expect(note).toContainText('머리말·꼬리말, 각주 안의 글은 AI가 읽지 못해요');
+    await expect(note).toContainText('본문, 표 안의 글, 머리말·꼬리말, 각주·미주를 다뤄요');
+    await expect(note).toContainText('글상자 안의 글은 AI가 읽지 못해요');
     await expect(note).toContainText('첫 글자를 기준으로');
   });
 

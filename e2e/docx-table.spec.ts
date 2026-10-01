@@ -42,7 +42,7 @@ test.describe('Word(DOCX) 문서의 표 안의 글', () => {
     await page.getByRole('tab', { name: /서식 점검/ }).click();
     await expect(page.getByText('같은 역할의 문단끼리 서식이 다른 곳을 찾지 못했어요.')).toBeVisible();
     await expect(page.getByRole('button', { name: '변경 내역에 올리기' })).toBeDisabled();
-    await expect(page.getByTestId('coverage-note')).toContainText('표 밖 본문만 비교하고');
+    await expect(page.getByTestId('coverage-note')).toContainText('본문(표 밖)만 비교하고');
   });
 
   test('표 밖 본문의 서식 차이는 표가 있어도 그대로 찾는다', async ({ page }) => {

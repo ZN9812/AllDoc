@@ -28,4 +28,13 @@ describe('resolveSpans', () => {
   it('같은 범위는 한 번만 담는다', () => {
     expect(resolveSpans([{ paragraph: 2 }, { paragraph: 2 }], blocks)).toHaveLength(1);
   });
+
+  it('본문 밖(머리말·각주 등)의 글이면 그 이야기를 함께 담아, 편집기가 그 자리를 찾을 수 있게 한다', () => {
+    const story = { kind: 'story', storyType: 'footnote', noteId: '3' } as const;
+    const withNote: BlockLike[] = [...blocks, { nodeId: 'n', type: 'paragraph', text: ' 각주 몇일', area: { story, kind: 'footnote', part: 'word/footnotes.xml', number: 3 } }];
+    expect(resolveSpans([{ paragraph: 4, find: '몇일' }, { paragraph: 0 }], withNote)).toEqual([
+      { blockId: 'n', start: 4, end: 6, story },
+      { blockId: 'a', start: 0, end: 12 },
+    ]);
+  });
 });

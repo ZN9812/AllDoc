@@ -16,6 +16,8 @@ export interface ParsedParagraph {
   fonts: FontSlots;
   /** 표 칸 안의 문단이면 그 칸의 위치. 본문의 문단이면 없다. */
   cell?: CellPlace;
+  /** 글상자 안의 문단이면 true. 편집기의 문서 API 는 글상자 안의 문단을 본문 문단처럼 목록에 올리지만 본문 문단으로는 고칠 수 없다. */
+  inTextBox?: true;
 }
 
 export interface FontSlots {
@@ -314,7 +316,7 @@ function cellLocator(doc: Document): (p: Element) => CellPlace | undefined {
   };
 }
 
-/** 문서 XML 의 모든 문단(표 안 포함)의 글과 서식을 문서 순서대로 읽는다. 표 칸 안의 문단에는 칸의 위치(cell)가 붙는다. */
+/** 문서 XML 의 모든 문단(표 안 포함)의 글과 서식을 문서 순서대로 읽는다. 표 칸 안의 문단에는 칸의 위치(cell)가, 글상자 안의 문단에는 inTextBox 가 붙는다. */
 export function parseDocxParagraphs(documentXml: string, stylesXml: string | null, parse: (xml: string) => Document): ParsedParagraph[] {
   const sheet = parseStyleSheet(stylesXml, parse);
   const doc = parse(documentXml);
@@ -322,8 +324,33 @@ export function parseDocxParagraphs(documentXml: string, stylesXml: string | nul
   return Array.from(doc.getElementsByTagNameNS(W, 'p')).map((p) => {
     const parsed = resolveParagraph(p, sheet);
     const cell = locate(p);
-    return cell ? { ...parsed, cell } : parsed;
+    return { ...parsed, ...(cell ? { cell } : {}), ...(ancestor(p, 'txbxContent') ? { inTextBox: true as const } : {}) };
   });
+}
+
+/** 본문에서 각주·미주 표시가 나오는 순서대로의 각주·미주 번호(w:id). Word 는 이 순서대로 1, 2, 3 … 번호를 매겨 보여 준다. */
+export interface NoteOrder {
+  footnote: string[];
+  endnote: string[];
+}
+
+export function parseNoteOrder(documentXml: string, parse: (xml: string) => Document): NoteOrder {
+  const doc = parse(documentXml);
+  const idsOf = (name: string): string[] => {
+    const out: string[] = [];
+    for (const e of Array.from(doc.getElementsByTagNameNS(W, name))) {
+      const id = attr(e, 'id');
+      if (id !== null && !out.includes(id)) out.push(id);
+    }
+    return out;
+  };
+  return { footnote: idsOf('footnoteReference'), endnote: idsOf('endnoteReference') };
+}
+
+/** 설정 파일(word/settings.xml)이 홀수·짝수 쪽 머리말·꼬리말을 따로 쓰게 했는가 */
+export function usesEvenAndOddHeaders(settingsXml: string | null, parse: (xml: string) => Document): boolean {
+  if (!settingsXml) return false;
+  return onOff(kid(parse(settingsXml).documentElement, 'evenAndOddHeaders')) === true;
 }
 
 export const browserParse = (xml: string): Document => new DOMParser().parseFromString(xml, 'application/xml');
