@@ -93,7 +93,7 @@ Docker로 띄우려면 [`docs/DEPLOY.md`](docs/DEPLOY.md)를 보세요.
 그리고 두 가지는 우리가 직접 만들지 않은 문서로 확인했습니다.
 
 - **DOCX를 LibreOffice로 다시 열기**: LibreOffice가 만든 DOCX를 열어 고치고, 내려받은 파일을 제3자 프로그램인 LibreOffice로 다시 열어 고친 두 줄 말고는 글이 같고 PDF로도 변환되는지 봅니다(`e2e/interop.spec.ts`. LibreOffice가 없으면 건너뛰고, CI는 설치해서 돌립니다).
-- **실제 한글 문서 12개**: rhwp 저장소가 예제로 두는 HWP·HWPX로 열기·서식 제안 적용·내보내기·다시 읽기·되돌리기를 시험했습니다(`web/src/engines/hwp/corpus.test.ts`). 글이 사라지거나 달라진 곳은 없었습니다.
+- **실제 한글 문서 12개**: rhwp 저장소가 예제로 두는 HWP·HWPX로 열기·서식 제안 적용·내보내기·다시 읽기·되돌리기를 시험했습니다(`web/src/engines/hwp/corpus.test.ts`). 글이 사라지거나 달라진 곳은 없었습니다. 예제는 한글 편집기를 빌드할 때 받아지므로, 빌드 전에 도는 일반 `npm test`에서는 건너뛰고 CI가 빌드 뒤에 따로 필수로 돌립니다.
 
 확인하지 못한 것(운영 전에 직접 확인하세요):
 

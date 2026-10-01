@@ -24,6 +24,11 @@ jobs:
       - run: npm test
       - run: npm run check:licenses
       - run: npm run build
+      # 예제 한글 문서는 한글 편집기를 빌드할 때 받아진다. 그래서 위의 단위 시험(빌드 전)에서는 이 시험이 빠지고, 빌드 뒤에 따로 돌린다.
+      # 문서가 없으면 건너뛰지 않고 실패하도록 한다.
+      - run: npm test -w web -- src/engines/hwp/corpus.test.ts
+        env:
+          REQUIRE_HWP_SAMPLES: "1"
       - run: npx playwright install --with-deps chromium
       # 종단 시험 중 하나(e2e/interop.spec.ts)는 LibreOffice 가 내려받은 DOCX 를 열 수 있는지 확인한다.
       - name: LibreOffice 설치

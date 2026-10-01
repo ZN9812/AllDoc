@@ -1,6 +1,7 @@
 // @vitest-environment node
 // 실제 한글 문서(rhwp 저장소가 예제로 두는 파일들)로 읽기·고치기·되돌리기·내보내기를 시험한다.
 // 파일은 한글 편집기를 빌드할 때 .cache/rhwp-studio 에 받아진다. 없으면(받지 않은 환경) 건너뛴다.
+// 다만 REQUIRE_HWP_SAMPLES=1 이면(CI) 건너뛰지 않고 실패한다. 조용히 빠진 채로 통과하지 않게 하려는 것이다.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -8,13 +9,19 @@ import { analyzeConsistency } from '../../ai/consistency';
 import { HwpModel, type HwpFormat } from './model';
 import { loadNodeCore } from './testing';
 
-const DIR = join(__dirname, '../../../../.cache/rhwp-studio/src/rhwp-studio/public/samples');
+// RHWP_SAMPLES_DIR 로 예제 폴더를 바꿀 수 있다(없는 폴더를 가리켜 "예제 없음" 상황을 시험할 때도 쓴다).
+const DIR = process.env.RHWP_SAMPLES_DIR || join(__dirname, '../../../../.cache/rhwp-studio/src/rhwp-studio/public/samples');
+const REQUIRED = process.env.REQUIRE_HWP_SAMPLES === '1';
 const files = existsSync(DIR) ? readdirSync(DIR).filter((n) => /\.(hwp|hwpx)$/i.test(n)).sort() : [];
 
 const kindOf = (name: string): HwpFormat => (name.toLowerCase().endsWith('x') ? 'hwpx' : 'hwp');
 const texts = (m: HwpModel): string[] => m.summarize().paragraphs.map((p) => p.text);
 
-describe.skipIf(files.length === 0)('실제 한글 문서(예제 파일)', () => {
+describe.skipIf(files.length === 0 && !REQUIRED)('실제 한글 문서(예제 파일)', () => {
+  it('예제 문서가 준비되어 있다', () => {
+    expect(files.length, `예제 한글 문서를 찾지 못했어요(${DIR}). 한글 편집기를 먼저 빌드하세요(npm run build).`).toBeGreaterThan(0);
+  });
+
   const open = (name: string) => {
     const Doc = loadNodeCore();
     return { Doc, bytes: new Uint8Array(readFileSync(join(DIR, name))), kind: kindOf(name) };
