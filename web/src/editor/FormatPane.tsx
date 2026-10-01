@@ -6,6 +6,7 @@ import { supportsFormat } from '../engines/registry';
 import { aiAvailability, useAuth } from '../state/auth';
 import { useRules } from '../state/rules';
 import { useSettings } from '../state/settings';
+import { COVERAGE_NOTE, MIXED_FORMAT_NOTE } from './coverage';
 import { useEditor } from './store';
 
 const CRITERIA_TEXT: Record<Criteria, { name: string; hint: string }> = {
@@ -182,6 +183,11 @@ export default function FormatPane({ kind }: { kind: DocKind }) {
         </>
       )}
       <p className="quota">점검 결과 보기와 "변경 내역에 올리기"는 로그인 없이 쓸 수 있어요. 올린 제안은 적용하기 전에는 문서를 바꾸지 않아요.</p>
+      {COVERAGE_NOTE[kind] && (
+        <p className="quota" data-testid="coverage-note">
+          {COVERAGE_NOTE[kind]} {MIXED_FORMAT_NOTE}
+        </p>
+      )}
     </div>
   );
 }

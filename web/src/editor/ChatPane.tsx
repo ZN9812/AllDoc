@@ -5,6 +5,7 @@ import { loginUrl } from '../ai/client';
 import { useLocation, Link } from 'react-router-dom';
 import { aiAvailability, useAuth } from '../state/auth';
 import { useSettings } from '../state/settings';
+import { COVERAGE_NOTE } from './coverage';
 import { useEditor } from './store';
 
 export default function ChatPane({ kind }: { kind: DocKind }) {
@@ -106,6 +107,11 @@ export default function ChatPane({ kind }: { kind: DocKind }) {
       {me?.quota && (
         <p className="quota">
           오늘 남은 AI 사용 횟수 {me.quota.remaining}/{me.quota.limit}
+        </p>
+      )}
+      {COVERAGE_NOTE[kind] && (
+        <p className="quota" data-testid="coverage-note">
+          {COVERAGE_NOTE[kind]}
         </p>
       )}
     </div>

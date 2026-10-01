@@ -67,6 +67,8 @@ interface EditorState {
   restoreItem: (id: string) => void;
   setFocus: (id: string | null) => void;
   flash: (targets: HighlightTarget[], ms?: number) => void;
+  /** 제안이 가리키는 첫 곳을 문서에서 보여 준다(편집기가 지원할 때). */
+  revealItem: (id: string) => void;
 }
 
 /**
@@ -266,9 +268,17 @@ export const useEditor = create<EditorState>((set, get) => {
       sync();
     },
 
+    revealItem: (id) => {
+      const item = get().items.find((i) => i.proposal.id === id);
+      const op = item?.proposal.ops[0];
+      if (op) get().engine?.reveal?.(targetOf(op));
+    },
+
     flash: (targets, ms = 1600) => {
       set({ flashTargets: targets });
       sync();
+      const first = targets[0];
+      if (first) get().engine?.reveal?.(first);
       setTimeout(() => {
         // 그 사이 다른 곳을 눌렀다면 지우지 않는다.
         if (get().flashTargets === targets) {

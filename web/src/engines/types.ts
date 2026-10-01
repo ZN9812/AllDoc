@@ -48,6 +48,8 @@ export interface EngineHandle {
   /** 변경을 한 묶음으로 적용한다. 하나라도 실패하면 모두 되돌리고 실패를 돌려준다. */
   apply(ops: Op[]): Promise<ApplyResult>;
   setHighlights(state: HighlightState): void;
+  /** 문서에서 그 곳을 보여 준다(스크롤·커서 이동). 마우스를 올렸을 때가 아니라 사용자가 "문서에서 보기"나 점검 결과를 눌렀을 때만 부른다. 지원하지 않는 편집기는 없다. */
+  reveal?(target: HighlightTarget): void;
   /** 방금 내려받은 저장본을 이 브라우저에 보관했음을 편집기에 알린다(편집기 안의 "저장 안 됨" 표시와 복구 임시본을 정리하는 데 쓴다). */
   markSaved?(): Promise<void>;
 }

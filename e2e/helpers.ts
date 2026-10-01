@@ -82,3 +82,13 @@ export async function askAi(page: Page, text: string): Promise<void> {
   const dialog = page.getByRole('dialog');
   if (await dialog.isVisible().catch(() => false)) await dialog.getByRole('button', { name: '동의하고 계속' }).click();
 }
+
+/** 서식 점검 탭에서 "내 규칙"으로 AI 에게 고치게 한다(처음이면 동의 창에 동의). */
+export async function fixByRule(page: Page, rule: string): Promise<void> {
+  await page.getByRole('tab', { name: /서식 점검/ }).click();
+  await page.getByRole('radio', { name: /내 규칙/ }).check();
+  await page.getByLabel('내 규칙', { exact: true }).fill(rule);
+  await page.getByRole('button', { name: 'AI로 고치기' }).click();
+  const dialog = page.getByRole('dialog');
+  if (await dialog.isVisible().catch(() => false)) await dialog.getByRole('button', { name: '동의하고 계속' }).click();
+}

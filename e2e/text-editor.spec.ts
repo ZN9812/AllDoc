@@ -65,4 +65,14 @@ test.describe('글 문서(TXT·MD) 편집', () => {
     await page.keyboard.press('ArrowLeft');
     await expect(page.getByRole('tab', { name: /AI 대화/ })).toHaveAttribute('aria-selected', 'true');
   });
+
+  test('긴 글은 종이가 글 길이만큼 늘어나고, AI 표시를 그리는 층도 같은 높이다', async ({ page }) => {
+    await openFile(page, textFile('긴글.txt', Array.from({ length: 200 }, (_, i) => `${i + 1}번째 줄입니다.`).join('\n')));
+    const area = (await page.locator('.text-engine textarea').boundingBox())!;
+    expect(area.height).toBeGreaterThan(3000);
+    const paper = (await page.locator('.text-engine').boundingBox())!;
+    expect(paper.height).toBeGreaterThanOrEqual(area.height - 1);
+    const layer = (await page.locator('.text-engine .layer').boundingBox())!;
+    expect(layer.height).toBeGreaterThanOrEqual(area.height - 1);
+  });
 });

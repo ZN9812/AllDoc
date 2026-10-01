@@ -116,6 +116,12 @@ export class HwpModel {
     return null;
   }
 
+  /** 편집기에서 이 문단으로 이동하는 데 쓰는 위치(구역, 구역 안 문단 번호, 글자 수) */
+  paragraphTarget(index: number): { section: number; paragraph: number; length: number } | null {
+    const loc = this.locate(index);
+    return loc ? { section: loc.sec, paragraph: loc.para, length: this.doc.getParagraphLength(loc.sec, loc.para) } : null;
+  }
+
   private text(loc: Loc): string {
     const len = this.doc.getParagraphLength(loc.sec, loc.para);
     return len > 0 ? this.doc.getTextRange(loc.sec, loc.para, 0, len) : '';

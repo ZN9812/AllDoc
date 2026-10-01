@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { askAi, downloadAs, loginAs, openFile, unique } from './helpers';
-import { makeHwp, readHwp, SAMPLE_LINES } from './hwp-fixtures';
+import { askAi, downloadAs, fixByRule, loginAs, openFile, unique } from './helpers';
+import { makeHwp, makeLongHwp, readHwp, SAMPLE_LINES } from './hwp-fixtures';
 
 const studio = (page: Page) => page.frameLocator('.hwp-host iframe');
 
@@ -111,6 +111,42 @@ test.describe('한글(HWP·HWPX) 문서', () => {
     await expect(page.getByRole('button', { name: '내려받기' })).toBeEnabled({ timeout: 30_000 });
     const file = await downloadAs(page, /^HWP로 내려받기/);
     expect(readHwp(file.bytes).at(-1)?.text).toContain('추가한 글');
+  });
+
+  test('내 규칙: 글자 크기를 한꺼번에 맞추면 내려받은 파일에 반영되고, 되돌릴 수 있다', async ({ page }) => {
+    await loginAs(page);
+    await openFile(page, makeHwp('hwp'));
+    await fixByRule(page, '모든 글자는 12pt');
+    await page.getByRole('tab', { name: /변경 내역/ }).click();
+    const card = page.getByTestId('proposal-card').filter({ hasText: '글자 크기를 12pt로' });
+    await expect(card).toBeVisible();
+    await card.getByRole('button', { name: '적용' }).click();
+    await expect(card).toContainText('적용됨');
+    expect(readHwp((await downloadAs(page, /^HWP로 내려받기/)).bytes).map((p) => p.sizePt)).toEqual([12, 12, 12, 12, 12]);
+
+    await card.getByRole('button', { name: '되돌리기' }).click();
+    await expect(card.getByRole('button', { name: '적용' })).toBeVisible();
+    expect(readHwp((await downloadAs(page, /^HWP로 내려받기/)).bytes).map((p) => p.sizePt)).toEqual([18, 10, 10, 13, 10]);
+  });
+
+  test('"문서에서 보기"를 누르면 한글 편집기가 그 문단이 있는 쪽으로 이동한다', async ({ page }) => {
+    await loginAs(page);
+    await openFile(page, makeLongHwp());
+    const scrollTop = () => page.frames().find((f) => f.url().includes('rhwp-studio'))!.evaluate(() => document.querySelector('#scroll-container')?.scrollTop ?? -1);
+    expect(await scrollTop()).toBe(0);
+    await askAi(page, '맞춤법');
+    await page.getByRole('button', { name: '변경 내역 보기' }).click();
+    const card = page.getByTestId('proposal-card').filter({ hasText: '"몇일" 고치기' });
+    await card.getByRole('button', { name: '문서에서 보기' }).click();
+    await expect.poll(scrollTop, { timeout: 15_000 }).toBeGreaterThan(5000);
+  });
+
+  test('AI·서식 점검이 다루는 범위의 한계(표 안의 글 등)를 서식 점검 탭에서 알려 준다', async ({ page }) => {
+    await openFile(page, makeHwp('hwp'));
+    await page.getByRole('tab', { name: /서식 점검/ }).click();
+    const note = page.getByTestId('coverage-note');
+    await expect(note).toContainText('본문 문단만 다뤄요');
+    await expect(note).toContainText('표, 머리말·꼬리말, 각주 안의 글은 AI가 읽지 못해요');
   });
 
   test('깨진 한글 파일은 알아듣기 쉬운 안내를 보여 준다', async ({ page }) => {

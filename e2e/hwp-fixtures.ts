@@ -50,6 +50,19 @@ export function makeHwp(format: 'hwp' | 'hwpx' = 'hwp', name = `sample.${format}
   return { name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) };
 }
 
+/** 쪽이 여러 장인 긴 한글 문서(200문단). 191번째 문단에만 오탈자("몇일")가 있다. */
+export function makeLongHwp(name = 'long.hwp'): Upload {
+  const Doc = core();
+  const d = Doc.createEmpty();
+  d.createBlankDocument();
+  const total = 200;
+  for (let i = 0; i < total; i++) {
+    d.insertText(0, i, 0, i === 190 ? `${i + 1}번째 문단입니다. 몇일 뒤에 만나요.` : `${i + 1}번째 문단입니다. 특별한 내용이 없는 줄이에요. 이 줄은 조금 길게 써서 쪽이 넘어가도록 합니다.`);
+    if (i < total - 1) d.splitParagraph(0, i, d.getParagraphLength(0, i));
+  }
+  return { name, mimeType: 'application/octet-stream', buffer: Buffer.from(d.exportHwp()) };
+}
+
 export interface ParagraphRead {
   text: string;
   sizePt: number;

@@ -182,6 +182,8 @@
 .text-engine {
   position: relative;
   flex: none;
+  /* 가로 flex 안에서 기본값(stretch)이면 높이가 화면 높이로 묶여, 긴 글이 종이 밖으로 넘치고 AI 표시(층)가 첫 화면 높이에서 잘린다. */
+  align-self: flex-start;
   width: min(100%, 820px);
   min-height: 100%;
   background: var(--paper);
@@ -341,6 +343,30 @@
   /* 문서 종이는 두 테마 모두 흰색(SuperDoc 은 종이 색도 --sd-ui-bg 에서 가져오므로 따로 지정한다). */
   --sd-layout-page-bg: #ffffff;
   --sd-surface-page: #ffffff;
+}
+
+/* AI 가 고칠 곳 표시: 쪽(항상 흰색) 위에 청록색으로 겹쳐 그린다. 글자가 가려지지 않도록 곱하기로 섞는다. */
+.docx-hl {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 0;
+  pointer-events: none;
+  z-index: 2;
+  /* 곱하기는 막 전체에 걸어야 아래의 문서와 섞인다(막이 쌓임 맥락을 만들어서, 안쪽 칸에 걸면 투명한 막과만 섞여 글자를 가린다). */
+  mix-blend-mode: multiply;
+}
+
+.docx-hl-box {
+  position: absolute;
+  border-radius: 3px;
+  background: var(--paper-ai-bg);
+  box-shadow: 0 0 0 2px var(--paper-ai-bg);
+}
+
+.docx-hl-box.focus {
+  box-shadow: 0 0 0 2px var(--paper-ai-bg), 0 0 0 4px var(--ai);
 }
 
 /* 쪽이 가운데에 놓이도록 한다(SuperDoc 은 왼쪽에 붙여 그린다). */

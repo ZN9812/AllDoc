@@ -14,6 +14,7 @@ export default function TextEngine({ doc, toolsHost, onReady, onDirty, onPages, 
   const [hl, setHl] = useState<HighlightState>({ pending: [], focus: [] });
   const textRef = useRef('');
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  const layerRef = useRef<HTMLDivElement>(null);
   const isMd = doc.kind === 'md';
 
   useEffect(() => {
@@ -61,6 +62,12 @@ export default function TextEngine({ doc, toolsHost, onReady, onDirty, onPages, 
           return result;
         }),
       setHighlights: setHl,
+      // 가리키는 곳(진하게 표시된 곳)이 화면 가운데 오도록 스크롤한다. 표시가 그려진 뒤에 찾아야 해서 두 프레임 기다린다.
+      reveal: () => {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => layerRef.current?.querySelector('mark.focus')?.scrollIntoView({ block: 'center', behavior: 'smooth' })),
+        );
+      },
     };
     onReady(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -110,7 +117,7 @@ export default function TextEngine({ doc, toolsHost, onReady, onDirty, onPages, 
           <div className="md-preview" dangerouslySetInnerHTML={{ __html: previewHtml }} />
         ) : (
           <>
-            <div className="layer" aria-hidden="true">
+            <div className="layer" aria-hidden="true" ref={layerRef}>
               {segments.map((s, i) =>
                 s.mark ? (
                   <mark key={i} className={s.mark === 'focus' ? 'focus' : undefined}>

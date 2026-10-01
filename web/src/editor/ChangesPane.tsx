@@ -38,6 +38,13 @@ function Card({ item }: { item: ProposalItem }) {
   const revertItem = useEditor((s) => s.revertItem);
   const restoreItem = useEditor((s) => s.restoreItem);
   const setFocus = useEditor((s) => s.setFocus);
+  const revealItem = useEditor((s) => s.revealItem);
+  const canReveal = useEditor((s) => Boolean(s.engine?.reveal));
+  const locate = canReveal && status !== 'dismissed' && status !== 'applied' && (
+    <button type="button" className="link" onClick={() => revealItem(p.id)}>
+      문서에서 보기
+    </button>
+  );
 
   return (
     <li
@@ -68,6 +75,7 @@ function Card({ item }: { item: ProposalItem }) {
             <button type="button" className="link" onClick={() => dismissItem(p.id)}>
               취소
             </button>
+            {locate}
           </>
         )}
         {status === 'applied' && (
@@ -92,6 +100,7 @@ function Card({ item }: { item: ProposalItem }) {
             <button type="button" className="link" onClick={() => restoreItem(p.id)}>
               다시 시도
             </button>
+            {locate}
           </>
         )}
         {status === 'applied' && message && <span className="st bad">{message}</span>}

@@ -177,8 +177,19 @@ export default function HwpEngine({ doc, onReady, onDirty, onPages, onError }: E
               setBusy(null);
             }
           },
-          // 편집기 화면은 별도 문서(iframe)라서 AI 가 고칠 곳을 문서 위에 겹쳐 표시하지는 못한다. 변경 내역 카드로 확인한다.
+          // 편집기 화면은 별도 문서(iframe)라서 AI 가 고칠 곳을 문서 위에 겹쳐 표시하지는 못한다. 변경 내역 카드로 확인하고,
+          // "문서에서 보기"를 누르면 편집기가 그 문단으로 이동한다.
           setHighlights: () => undefined,
+          reveal: (t) => {
+            void (async () => {
+              try {
+                const loc = (await sync()).paragraphTarget(t.paragraph);
+                if (loc) await (studio as RhwpEditor).focusTarget({ kind: 'body_paragraph', section: loc.section, paragraph: loc.paragraph, charOffset: 0, length: loc.length });
+              } catch {
+                // 위치를 보여 주지 못해도 편집에는 영향이 없다.
+              }
+            })();
+          },
           markSaved: async () => {
             await (studio as RhwpEditor).notifySaved(doc.name);
           },

@@ -200,4 +200,17 @@ test.describe('AI 제안 → 적용/취소/되돌리기', () => {
     await expect(page.locator('.bub.err')).toContainText('혼잡해요');
     await expect(page.getByLabel('AI에게 시키기')).toBeEnabled();
   });
+  test('"문서에서 보기"를 누르면 긴 글 문서에서도 그 줄로 스크롤한다', async ({ page }) => {
+    await loginAs(page);
+    const lines = Array.from({ length: 200 }, (_, i) => (i === 190 ? '191번째 줄입니다. 몇일 뒤에 만나요.' : `${i + 1}번째 줄입니다. 특별한 내용이 없는 줄이에요.`));
+    await openFile(page, textFile('긴글.txt', lines.join('\n')));
+    await ask(page, '맞춤법');
+    await agreeIfAsked(page);
+    await page.getByRole('button', { name: '변경 내역 보기' }).click();
+    const canvas = page.locator('main.canvas');
+    expect(await canvas.evaluate((el) => el.scrollTop)).toBe(0);
+    const card = page.getByTestId('proposal-card').filter({ hasText: '"몇일" 고치기' });
+    await card.getByRole('button', { name: '문서에서 보기' }).click();
+    await expect.poll(() => canvas.evaluate((el) => el.scrollTop), { timeout: 15_000 }).toBeGreaterThan(1000);
+  });
 });
