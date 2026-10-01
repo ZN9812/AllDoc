@@ -76,4 +76,10 @@ describe('데모 AI와 표 칸 안의 글', () => {
     expect(r.proposals.length).toBe(3); // 글꼴, 크기, 줄 간격
     for (const p of r.proposals) expect(p.ops.map((o) => o.paragraph)).toEqual([0]);
   });
+
+  it('규칙에 "표"가 적혀 있으면 표 칸 안의 문단에도 서식 규칙을 적용한다', async () => {
+    const r = await mock.propose({ request: req({ mode: 'format_check', criteria: 'rules', rulesText: '표 안의 글도 맑은 고딕 11pt, 줄 간격 160%', document }) });
+    expect(r.proposals.length).toBe(3);
+    for (const p of r.proposals) expect(p.ops.map((o) => o.paragraph)).toEqual([0, 3]);
+  });
 });

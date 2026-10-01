@@ -105,6 +105,27 @@ test.describe('Word(DOCX) 문서의 표 안의 글', () => {
     expect(by('소속')?.sizes).toEqual([14]);
   });
 
+  test('규칙에 "표"를 적으면 표 칸(안쪽 표 포함)의 글자 크기와 줄 간격도 바꾸고, 되돌리면 처음 모양으로 돌아간다', async ({ page }) => {
+    await loginAs(page);
+    await openFile(page, makeDocx('휴가.docx', TABLE_DOC));
+    await fixByRule(page, '표 안의 글도 11pt, 줄 간격 150%');
+    await page.getByRole('tab', { name: /변경 내역/ }).click();
+    const cards = page.getByTestId('proposal-card');
+    await expect(cards).toHaveCount(2); // 글자 크기, 줄 간격
+    await page.getByRole('button', { name: '전체 적용' }).click();
+    await expect(page.locator('.toast').last()).toContainText('2개를 적용했어요');
+
+    const cellTexts = ['성명', '홍길동', '동행', '오랫만에 가요', '신청 사유', '몇일 동안 휴가를 할려고 합니다'];
+    const applied = await readDocx((await downloadAs(page)).bytes);
+    for (const t of cellTexts) expect(applied.find((p) => p.text === t), t).toMatchObject({ sizes: [11], linePct: 150 });
+
+    for (const card of await cards.all()) await card.getByRole('button', { name: '되돌리기' }).click();
+    await expect(cards.first().getByRole('button', { name: '적용' })).toBeVisible();
+    const reverted = await readDocx((await downloadAs(page)).bytes);
+    // 처음에는 문서 기본값(10pt, 100%)을 물려받던 칸도 값을 적어서 되돌린다. 모양은 처음과 같다.
+    for (const t of cellTexts) expect(reverted.find((p) => p.text === t), t).toMatchObject({ sizes: [10], linePct: 100 });
+  });
+
   test('칸을 합친 표(가로·세로)에서도 칸의 위치를 바르게 알려 준다', async ({ page }) => {
     await loginAs(page);
     await openFile(
