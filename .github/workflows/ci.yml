@@ -25,7 +25,13 @@ jobs:
       - run: npm run check:licenses
       - run: npm run build
       - run: npx playwright install --with-deps chromium
+      # 종단 시험 중 하나(e2e/interop.spec.ts)는 LibreOffice 가 내려받은 DOCX 를 열 수 있는지 확인한다.
+      - name: LibreOffice 설치
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer
       - run: npx playwright test
+        env:
+          # 설치에 실패했을 때 그 시험이 조용히 건너뛰어지지 않고 실패하도록 한다.
+          REQUIRE_SOFFICE: "1"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
