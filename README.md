@@ -80,9 +80,9 @@ Docker로 띄우려면 [`docs/DEPLOY.md`](docs/DEPLOY.md)를 보세요.
 
 확인한 것(자동 시험): 문서를 열고·고치고·저장·내려받기(HWP, HWPX, DOCX, PDF, TXT, MD), 서식 점검·기준 문서·내 규칙, 제안의 적용·취소·되돌리기와 오래된 제안 거절,
 로그인(개발용)·하루 한도·AI 요청 처리(가짜 AI), 야간 모드, 휴대폰 화면(Chromium 에뮬레이션), Docker 이미지로 띄워 같은 종단 시험.
-그리고 두 가지는 우리 코드가 아닌 쪽에서 확인했습니다.
+그리고 두 가지는 우리가 직접 만들지 않은 문서로 확인했습니다.
 
-- **DOCX를 LibreOffice로 다시 열기**: LibreOffice가 만든 DOCX를 열어 고치고 내려받은 파일을 다시 LibreOffice로 열어, 고친 두 줄 말고는 글이 같고 PDF로도 변환되는지 봅니다(`e2e/interop.spec.ts`. LibreOffice가 없으면 건너뛰고, CI는 설치해서 돌립니다).
+- **DOCX를 LibreOffice로 다시 열기**: LibreOffice가 만든 DOCX를 열어 고치고, 내려받은 파일을 제3자 프로그램인 LibreOffice로 다시 열어 고친 두 줄 말고는 글이 같고 PDF로도 변환되는지 봅니다(`e2e/interop.spec.ts`. LibreOffice가 없으면 건너뛰고, CI는 설치해서 돌립니다).
 - **실제 한글 문서 12개**: rhwp 저장소가 예제로 두는 HWP·HWPX로 열기·서식 제안 적용·내보내기·다시 읽기·되돌리기를 시험했습니다(`web/src/engines/hwp/corpus.test.ts`). 글이 사라지거나 달라진 곳은 없었습니다.
 
 확인하지 못한 것(운영 전에 직접 확인하세요):
