@@ -1,6 +1,6 @@
 // 실제 AI 없이 정해진 규칙으로 제안을 만드는 데모/개발용 연결부.
 // 화면 흐름(제안 → 적용/취소/되돌리기)을 API 키 없이 시험하고 보여 주려는 것이며, 실제 AI 의 품질을 대신하지 않는다.
-import { isFormatKind, type DocSummary } from '@alldoc/shared';
+import { eunNeun, euro, eulReul, iGa, isFormatKind, type DocSummary } from '@alldoc/shared';
 import type { RawOp, RawProposal } from './schema';
 import type { AiProvider, ProposeInput, ProviderResult } from './types';
 
@@ -17,6 +17,12 @@ const TYPOS: Array<[wrong: string, right: string]> = [
 ];
 
 const FONTS = ['함초롬바탕', '함초롬돋움', '나눔명조', '나눔고딕', '맑은 고딕', 'Times New Roman', 'Calibri', 'Arial', '바탕', '돋움', '굴림'];
+
+/** 낱말 뒤에 붙일 조사만 돌려준다(따옴표 안의 낱말 기준). */
+function josaOf(word: string, kind: 'eunNeun' | 'euro' | 'iGa' | 'eulReul'): string {
+  const f = { eunNeun, euro, iGa, eulReul }[kind];
+  return f(word).slice(word.length);
+}
 
 const blankOp: RawOp = {
   type: 'replaceText',
@@ -42,7 +48,7 @@ function spelling(doc: DocSummary): RawProposal[] {
     out.push({
       category: 'spelling',
       title: `"${wrong}" 고치기`,
-      description: `"${wrong}"은(는) 표준어가 아니에요. "${right}"(으)로 고칩니다. (${ops.length}곳)`,
+      description: `"${wrong}"${josaOf(wrong, 'eunNeun')} 표준어가 아니에요. "${right}"${josaOf(right, 'euro')} 고칩니다. (${ops.length}곳)`,
       before: wrong,
       after: right,
       ops,
@@ -71,7 +77,7 @@ function rulesProposals(doc: DocSummary, rules: string): RawProposal[] {
 
   if (font) {
     const ops = doc.paragraphs.filter((p) => p.char.fontFamily && p.char.fontFamily !== font).map((p) => ({ ...blankOp, type: 'setCharStyle' as const, paragraph: p.index, fontFamily: font }));
-    if (ops.length > 0) out.push({ category: 'format', title: `글꼴을 ${font}(으)로`, description: `규칙에 적힌 글꼴과 다른 문단 ${ops.length}곳을 맞춥니다.`, before: '다른 글꼴', after: font, ops });
+    if (ops.length > 0) out.push({ category: 'format', title: `글꼴을 ${euro(font)}`, description: `규칙에 적힌 글꼴과 다른 문단 ${ops.length}곳을 맞춥니다.`, before: '다른 글꼴', after: font, ops });
   }
   if (size) {
     const pt = Number(size);

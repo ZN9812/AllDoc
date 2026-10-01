@@ -1,5 +1,5 @@
 // 글 문서(TXT·MD)의 순수 계산 부분. 화면과 분리해서 시험한다.
-import type { DocKind, DocSummary, Op } from '@alldoc/shared';
+import { textGuard, type DocKind, type DocSummary, type Op } from '@alldoc/shared';
 import type { ApplyFailure } from '../types';
 import { stale, unsupported } from '../applyOps';
 
@@ -23,6 +23,7 @@ export function applyTextOp(text: string, op: Op): TextOpResult {
   const lines = splitLines(text);
   const line = lines[op.paragraph];
   if (line === undefined) return stale('문서가 바뀌어 해당 문단을 찾을 수 없어요.');
+  if (op.guard !== undefined && op.guard !== textGuard(line)) return stale('문서가 바뀌어 이 제안을 적용할 수 없어요. 다시 점검해 주세요.');
 
   let at: number;
   if (op.find === '') {
@@ -39,7 +40,7 @@ export function applyTextOp(text: string, op: Op): TextOpResult {
   return {
     ok: true,
     text: lines.join('\n'),
-    inverse: { type: 'replaceText', paragraph: op.paragraph, find: op.replace, replace: op.find, at },
+    inverse: { type: 'replaceText', paragraph: op.paragraph, find: op.replace, replace: op.find, at, guard: textGuard(lines[op.paragraph] ?? '') },
   };
 }
 

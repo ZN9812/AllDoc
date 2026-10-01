@@ -9,11 +9,13 @@ export interface PagesApi {
   goTo(index: number): void;
 }
 
+/** 내려받기 선택지. run 은 파일을 만들어 돌려주고, action 은 파일 대신 편집기 기능을 연다(예: 인쇄 창에서 PDF 로 저장). */
 export interface ExportOption {
   id: string;
   label: string;
   ext: string;
-  run(): Promise<Blob>;
+  run?(): Promise<Blob>;
+  action?(): Promise<void>;
 }
 
 export type ApplyFailure = { ok: false; reason: 'stale' | 'unsupported' | 'failed'; message: string };
@@ -46,6 +48,8 @@ export interface EngineHandle {
   /** 변경을 한 묶음으로 적용한다. 하나라도 실패하면 모두 되돌리고 실패를 돌려준다. */
   apply(ops: Op[]): Promise<ApplyResult>;
   setHighlights(state: HighlightState): void;
+  /** 방금 내려받은 저장본을 이 브라우저에 보관했음을 편집기에 알린다(편집기 안의 "저장 안 됨" 표시와 복구 임시본을 정리하는 데 쓴다). */
+  markSaved?(): Promise<void>;
 }
 
 export interface LoadedDoc {

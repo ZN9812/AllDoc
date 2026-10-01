@@ -1,7 +1,7 @@
 // 서식 점검: AI 없이 문서 안에서 바로 계산한다(로그인 불필요).
 //  - 문서 안 일관성: 같은 역할의 문단(번호 항목, 본문 등)끼리 글꼴·크기·정렬·줄 간격이 다른 "소수"를 찾는다.
 //  - 기준 문서: 양식 문서에서 역할별 대표 서식을 뽑아, 내 문서를 그 서식에 맞추는 제안을 만든다.
-import type { Align, CharStyle, DocSummary, Op, ParagraphInfo, ParaStyle, Proposal, StyleProfile } from '@alldoc/shared';
+import { eulReul, eunNeun, iGa, type Align, type CharStyle, type DocSummary, type Op, type ParagraphInfo, type ParaStyle, type Proposal, type StyleProfile } from '@alldoc/shared';
 
 export type Role = 'title' | 'level1' | 'level2' | 'level3' | 'level4' | 'bullet' | 'body';
 
@@ -172,7 +172,7 @@ export function analyzeConsistency(summary: DocSummary): ConsistencyResult {
         id: `local-${role}-${attr}-${paragraphs.join('_')}`,
         category: 'format',
         title: `${label} ${ATTR_LABEL[attr]} 통일`,
-        description: `${label} ${known.length}개 중 ${outliers.length}개만 ${ATTR_LABEL[attr]}이(가) 다릅니다. 가장 많이 쓴 ${after}에 맞춥니다.`,
+        description: `${label} ${known.length}개 중 ${outliers.length}개만 ${iGa(ATTR_LABEL[attr])} 다릅니다. 가장 많이 쓴 ${after}에 맞춥니다.`,
         before,
         after,
         ops: outliers.map((x) => opFor(attr, x.p.index, dominant)),
@@ -181,7 +181,7 @@ export function analyzeConsistency(summary: DocSummary): ConsistencyResult {
         id: proposal.id,
         role,
         attr,
-        label: `${label} ${ATTR_LABEL[attr]}이(가) 다른 곳 ${outliers.length}곳`,
+        label: `${label} ${iGa(ATTR_LABEL[attr])} 다른 곳 ${outliers.length}곳`,
         detail: proposal.description,
         paragraphs,
         proposal,
@@ -262,8 +262,8 @@ export function compareToProfile(summary: DocSummary, profile: StyleProfile): Pr
       proposals.push({
         id: `ref-${role}-${attr}-${paragraphs.join('_')}`,
         category: 'format',
-        title: `${ROLE_LABEL[role]} ${ATTR_LABEL[attr]}을(를) 기준 문서에 맞춤`,
-        description: `기준 문서(${profile.source})의 ${ROLE_LABEL[role]}은(는) ${after}입니다. 내 문서에서 ${different.length}곳이 다릅니다.`,
+        title: `${ROLE_LABEL[role]} ${eulReul(ATTR_LABEL[attr])} 기준 문서에 맞춤`,
+        description: `기준 문서(${profile.source})에서 ${ROLE_LABEL[role]}의 ${eunNeun(ATTR_LABEL[attr])} ${after}입니다. 내 문서에서 ${different.length}곳이 다릅니다.`,
         before,
         after,
         ops: different.map((p) => opFor(attr, p.index, target)),

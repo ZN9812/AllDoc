@@ -69,6 +69,48 @@ interface EditorState {
   flash: (targets: HighlightTarget[], ms?: number) => void;
 }
 
+/**
+ * 변경 하나가 성공했을 때 문단 글의 지문이 어떻게 바뀌었는지: 문단 번호 → { 적용 전, 적용 후 }.
+ * 적용 전은 먼저 적용된 변경의 guard, 적용 후는 되돌리기용 역변경(되돌릴 순서)에서 가장 먼저 나오는 것의 guard 이다.
+ */
+function guardTransitions(ops: Op[], inverse: Op[]): Map<number, { pre: string; post: string }> {
+  const out = new Map<number, { pre: string; post: string }>();
+  for (const op of ops) if (op.guard !== undefined && !out.has(op.paragraph)) out.set(op.paragraph, { pre: op.guard, post: op.guard });
+  const done = new Set<number>();
+  for (const inv of inverse) {
+    const t = out.get(inv.paragraph);
+    if (t && inv.guard !== undefined && !done.has(inv.paragraph)) {
+      t.post = inv.guard;
+      done.add(inv.paragraph);
+    }
+  }
+  return out;
+}
+
+const remap = (op: Op, t: Map<number, { pre: string; post: string }>): Op => {
+  const e = t.get(op.paragraph);
+  return e && op.guard === e.pre && e.pre !== e.post ? { ...op, guard: e.post } : op;
+};
+
+/**
+ * 우리가 직접 문서를 바꾼 뒤에는, 같은 문단을 가리키는 다른 제안들의 "본 글의 지문"도 새 글에 맞춰 준다.
+ * (같은 문단에 제안이 여러 개일 때, 하나를 적용하거나 되돌려도 나머지가 "문서가 바뀌었다"고 거절되지 않도록.)
+ * 사용자가 직접 고쳐서 달라진 경우는 지문이 맞지 않으므로 그대로 거절된다.
+ */
+export function rebaseGuards(items: ProposalItem[], skipId: string, ops: Op[], inverse: Op[]): ProposalItem[] {
+  const t = guardTransitions(ops, inverse);
+  if (t.size === 0) return items;
+  return items.map((it) => {
+    if (it.proposal.id === skipId) return it;
+    const next: ProposalItem = { ...it };
+    if (it.status === 'pending' || it.status === 'stale' || it.status === 'failed' || it.status === 'dismissed') {
+      next.proposal = { ...it.proposal, ops: it.proposal.ops.map((op) => remap(op, t)) };
+    }
+    if (it.status === 'applied' && it.inverse) next.inverse = it.inverse.map((op) => remap(op, t));
+    return next;
+  });
+}
+
 const targetOf = (op: Op): HighlightTarget => (op.type === 'replaceText' ? { paragraph: op.paragraph, find: op.find } : { paragraph: op.paragraph });
 
 export function computeHighlights(items: ProposalItem[], focusId: string | null, flash: HighlightTarget[] = []): HighlightState {
@@ -144,7 +186,12 @@ export const useEditor = create<EditorState>((set, get) => {
         for (const proposal of ps) {
           const at = items.findIndex((i) => i.proposal.id === proposal.id);
           const existing = at >= 0 ? items[at] : undefined;
-          if (existing && (existing.status === 'pending' || existing.status === 'applied')) continue;
+          if (existing?.status === 'applied') continue;
+          if (existing?.status === 'pending') {
+            // 같은 제안을 다시 올리면 최신 점검 결과(문단 번호·지문)로 갱신하되, 새로 올라간 것으로 세지는 않는다.
+            items[at] = { ...existing, proposal };
+            continue;
+          }
           const fresh: ProposalItem = { proposal, status: 'pending', inverse: null, message: null };
           if (at >= 0) items[at] = fresh;
           else items.push(fresh);
@@ -162,8 +209,10 @@ export const useEditor = create<EditorState>((set, get) => {
         const item = items.find((i) => i.proposal.id === id);
         if (!engine || !item || item.status !== 'pending') return;
         const r = await engine.apply(item.proposal.ops);
-        if (r.ok) patch(id, { status: 'applied', inverse: r.inverse, message: null });
-        else patch(id, { status: r.reason === 'stale' ? 'stale' : 'failed', message: r.message });
+        if (r.ok) {
+          set((st) => ({ items: rebaseGuards(st.items, id, item.proposal.ops, r.inverse) }));
+          patch(id, { status: 'applied', inverse: r.inverse, message: null });
+        } else patch(id, { status: r.reason === 'stale' ? 'stale' : 'failed', message: r.message });
         sync();
       }),
 
@@ -184,8 +233,16 @@ export const useEditor = create<EditorState>((set, get) => {
         const item = items.find((i) => i.proposal.id === id);
         if (!engine || !item || item.status !== 'applied' || !item.inverse) return;
         const r = await engine.apply(item.inverse);
-        if (r.ok) patch(id, { status: 'pending', inverse: null, message: null });
-        else patch(id, { message: '고친 뒤 문서가 바뀌어 되돌릴 수 없어요. 문서에서 직접 고쳐 주세요.' });
+        if (r.ok) {
+          set((st) => ({ items: rebaseGuards(st.items, id, item.inverse as Op[], r.inverse) }));
+          // 되돌린 제안은 다시 적용할 수 있어야 하므로, 되돌린 뒤의 글에 맞춰 지문을 새로 맞춘다.
+          const t = guardTransitions(item.inverse, r.inverse);
+          const ops = item.proposal.ops.map((op) => {
+            const e = t.get(op.paragraph);
+            return e && op.guard !== undefined ? { ...op, guard: e.post } : op;
+          });
+          patch(id, { status: 'pending', inverse: null, message: null, proposal: { ...item.proposal, ops } });
+        } else patch(id, { message: '고친 뒤 문서가 바뀌어 되돌릴 수 없어요. 문서에서 직접 고쳐 주세요.' });
         sync();
       }),
 

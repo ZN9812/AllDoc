@@ -1,5 +1,6 @@
 import type { DocSummary, Op, Proposal } from '@alldoc/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { attachGuards } from '../ai/guards';
 import { applyAtomic } from '../engines/applyOps';
 import { applyTextOp, summarizeText } from '../engines/text/model';
 import type { EngineHandle, HighlightState } from '../engines/types';
@@ -218,5 +219,69 @@ describe('문서 위 표시(하이라이트)', () => {
       null,
     );
     expect(state.pending).toEqual([{ paragraph: 4 }]);
+  });
+});
+
+
+describe('같은 문단에 제안이 여러 개일 때(문단 글의 지문)', () => {
+  const guarded = (ps: Proposal[]) => attachGuards(ps, summarizeText(eng.text, 'txt'));
+  const LINE = '몇일 뒤에 할려고 해요';
+
+  beforeEach(() => {
+    eng = fakeEngine(LINE);
+    useEditor.getState().reset();
+    useEditor.getState().setEngine(eng.handle);
+  });
+
+  it('하나를 적용해도 같은 문단의 다른 제안이 "문서가 바뀌었다"고 거절되지 않는다', async () => {
+    useEditor.getState().addProposals(guarded([replace('a', 0, '몇일', '며칠'), replace('b', 0, '할려고', '하려고')]));
+    await useEditor.getState().applyItem('a');
+    await useEditor.getState().applyItem('b');
+    expect(item('a')?.status).toBe('applied');
+    expect(item('b')?.status).toBe('applied');
+    expect(eng.text).toBe('며칠 뒤에 하려고 해요');
+  });
+
+  it('먼저 적용한 것을 나중에 되돌려도(순서와 상관없이) 되돌려지고, 다시 적용할 수 있다', async () => {
+    useEditor.getState().addProposals(guarded([replace('a', 0, '몇일', '며칠'), replace('b', 0, '할려고', '하려고')]));
+    await useEditor.getState().applyItem('a');
+    await useEditor.getState().applyItem('b');
+    await useEditor.getState().revertItem('a'); // b 가 나중에 적용됐지만 a 를 먼저 되돌린다
+    expect(item('a')?.status).toBe('pending');
+    expect(eng.text).toBe('몇일 뒤에 하려고 해요');
+    await useEditor.getState().revertItem('b');
+    expect(eng.text).toBe(LINE);
+    await useEditor.getState().applyItem('a');
+    await useEditor.getState().applyItem('b');
+    expect(eng.text).toBe('며칠 뒤에 하려고 해요');
+  });
+
+  it('사용자가 그 문단을 직접 고치면 제안은 적용되지 않는다', async () => {
+    useEditor.getState().addProposals(guarded([replace('a', 0, '몇일', '며칠')]));
+    eng.text = '몇일 뒤에 할려고 해요!'; // 글 끝에 한 글자만 직접 더해도 문서가 바뀐 것이다
+    await useEditor.getState().applyItem('a');
+    expect(item('a')?.status).toBe('stale');
+    expect(eng.text).toBe('몇일 뒤에 할려고 해요!');
+  });
+
+  it('다른 문단을 고쳤다면 영향이 없다', async () => {
+    eng = fakeEngine('첫 줄입니다\n몇일 뒤에 만나요');
+    useEditor.getState().reset();
+    useEditor.getState().setEngine(eng.handle);
+    useEditor.getState().addProposals(guarded([replace('a', 1, '몇일', '며칠')]));
+    eng.text = '첫 줄을 고쳤어요\n몇일 뒤에 만나요';
+    await useEditor.getState().applyItem('a');
+    expect(item('a')?.status).toBe('applied');
+  });
+
+  it('제안을 다시 올리면(같은 id) 대기 중인 것은 최신 지문으로 갱신된다', async () => {
+    const first = guarded([replace('a', 0, '몇일', '며칠')]);
+    useEditor.getState().addProposals(first);
+    eng.text = '몇일 뒤에 할려고 해요!';
+    const added = useEditor.getState().addProposals(attachGuards([replace('a', 0, '몇일', '며칠')], summarizeText(eng.text, 'txt')));
+    expect(added).toBe(0);
+    await useEditor.getState().applyItem('a');
+    expect(item('a')?.status).toBe('applied');
+    expect(eng.text).toBe('며칠 뒤에 할려고 해요!');
   });
 });

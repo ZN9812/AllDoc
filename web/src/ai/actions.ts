@@ -9,6 +9,7 @@ import { useSettings } from '../state/settings';
 import { toast } from '../state/toast';
 import { ApiError, postPropose } from './client';
 import { analyzeConsistency, buildProfile, compareToProfile } from './consistency';
+import { attachGuards } from './guards';
 
 const totalChars = (s: DocSummary): number => s.paragraphs.reduce((n, p) => n + p.text.length, 0);
 
@@ -60,7 +61,7 @@ async function callAi(opts: CallOptions, userMessage: string): Promise<boolean> 
 
     const res = await postPropose({ ...opts, document, history });
     useAuth.getState().setQuota(res.quota);
-    const added = useEditor.getState().addProposals(res.proposals);
+    const added = useEditor.getState().addProposals(attachGuards(res.proposals, document));
     useEditor.getState().pushMsg({
       role: 'assistant',
       content: res.reply,
@@ -104,7 +105,10 @@ export async function runConsistency(): Promise<void> {
     return;
   }
   const summary = await engine.summarize();
-  useEditor.getState().setConsistency(analyzeConsistency(summary));
+  const result = analyzeConsistency(summary);
+  // 점검 결과의 제안에도 "본 문단 글의 지문"을 붙여, 나중에 문서가 바뀌었으면 적용을 거절하게 한다.
+  const guarded = attachGuards(result.findings.map((f) => f.proposal), summary);
+  useEditor.getState().setConsistency({ ...result, findings: result.findings.map((f, i) => ({ ...f, proposal: guarded[i] ?? f.proposal })) });
 }
 
 /** 점검에서 찾은 곳을 변경 내역의 제안으로 올린다(AI 사용 없음). */
@@ -149,7 +153,7 @@ export async function runReference(): Promise<number> {
   const { engine, reference } = useEditor.getState();
   if (!engine || !reference) return 0;
   const summary = await engine.summarize();
-  const proposals = compareToProfile(summary, reference.profile);
+  const proposals = attachGuards(compareToProfile(summary, reference.profile), summary);
   if (proposals.length === 0) {
     toast('기준 문서와 다른 곳을 찾지 못했어요.');
     return 0;

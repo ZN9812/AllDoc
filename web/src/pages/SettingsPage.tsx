@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { providerName } from '../ai/providerName';
-import { BRAND_NAME, SOURCE_URL } from '../brand/brand';
+import { SOURCE_URL } from '../brand/brand';
 import Nav from '../components/Nav';
 import TopBar from '../components/TopBar';
 import { removeDoc } from '../lib/docs';
@@ -112,7 +112,7 @@ export default function SettingsPage() {
           <section className="form-row" aria-labelledby="set-about">
             <h3 id="set-about">정보</h3>
             <p>
-              {BRAND_NAME}은(는) AGPL-3.0 라이선스의 오픈소스예요. 이 서비스의 소스 코드는{' '}
+              이 서비스는 AGPL-3.0 라이선스의 오픈소스예요. 소스 코드는{' '}
               <a href={SOURCE_URL} target="_blank" rel="noreferrer">
                 {SOURCE_URL.replace(/^https?:\/\//, '')}
               </a>

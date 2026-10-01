@@ -74,6 +74,7 @@ export default function EditorPage({ id }: { id: string }) {
       try {
         const meta = await saveWorking(id, await pending);
         setSave({ kind: 'saved', at: meta.updatedAt });
+        void engine.markSaved?.().catch(() => undefined);
       } catch (e) {
         dirty.current = true;
         setSave({ kind: 'error' });

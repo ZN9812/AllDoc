@@ -6,11 +6,11 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/copy-pdfjs-assets.mjs",
+    "predev": "node scripts/copy-pdfjs-assets.mjs && node scripts/build-rhwp-studio.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/copy-pdfjs-assets.mjs",
+    "prebuild": "node scripts/copy-pdfjs-assets.mjs && node scripts/build-rhwp-studio.mjs",
     "build": "tsc -p tsconfig.json && vite build",
-    "prepreview": "node scripts/copy-pdfjs-assets.mjs",
+    "prepreview": "node scripts/copy-pdfjs-assets.mjs && node scripts/build-rhwp-studio.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"

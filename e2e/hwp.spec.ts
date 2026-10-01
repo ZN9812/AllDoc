@@ -1,0 +1,142 @@
+import { readFileSync } from 'node:fs';
+import { expect, test, type Page } from '@playwright/test';
+import { loginAs, openFile, unique } from './helpers';
+import { makeHwp, readHwp, SAMPLE_LINES } from './hwp-fixtures';
+
+const studio = (page: Page) => page.frameLocator('.hwp-host iframe');
+
+async function downloadAs(page: Page, item: RegExp): Promise<{ name: string; bytes: Buffer }> {
+  await page.getByRole('button', { name: '내려받기' }).click();
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('menuitem', { name: item }).click()]);
+  return { name: dl.suggestedFilename(), bytes: readFileSync((await dl.path())!) };
+}
+
+async function askAi(page: Page, text: string): Promise<void> {
+  await page.getByRole('tab', { name: /AI 대화/ }).click();
+  await page.getByLabel('AI에게 시키기').fill(text);
+  await page.getByRole('button', { name: '보내기' }).click();
+  const dialog = page.getByRole('dialog');
+  if (await dialog.isVisible().catch(() => false)) await dialog.getByRole('button', { name: '동의하고 계속' }).click();
+}
+
+test.describe('한글(HWP·HWPX) 문서', () => {
+  test('HWP 를 열면 한글 편집기(메뉴·도구줄)와 문서가 보인다', async ({ page }) => {
+    await openFile(page, makeHwp('hwp'));
+    const iframe = page.locator('.hwp-host iframe');
+    await expect(iframe).toHaveAttribute('src', /\/rhwp-studio\/index\.html/);
+    await expect(studio(page).locator('#menu-bar')).toBeVisible();
+    await expect(studio(page).locator('canvas.document-page-canvas').first()).toBeVisible();
+    await expect(studio(page).locator('#sb-message, [id*="message"]').first()).toContainText('sample.hwp');
+    await expect(page.locator('.save-state')).toContainText('저장됨');
+  });
+
+  test('HWPX 도 열린다', async ({ page }) => {
+    await openFile(page, makeHwp('hwpx'));
+    await expect(studio(page).locator('#sb-message, [id*="message"]').first()).toContainText('sample.hwpx');
+  });
+
+  test('서식 점검: 크기가 다른 번호 항목을 찾아 맞추면 내려받은 파일에 반영된다', async ({ page }) => {
+    await openFile(page, makeHwp('hwp'));
+    await page.getByRole('tab', { name: /서식 점검/ }).click();
+    await expect(page.locator('.res li').first()).toContainText('번호 항목(1.) 글자 크기가 다른 곳 1곳');
+    await expect(page.locator('.res li').last()).toContainText('번호 체계 이상 없음');
+
+    await page.getByRole('button', { name: '변경 내역에 올리기' }).click();
+    const card = page.getByTestId('proposal-card').first();
+    await expect(card).toContainText('13pt');
+    await card.getByRole('button', { name: '적용' }).click();
+    await expect(card).toContainText('적용됨');
+    await expect(page.locator('.save-state')).toContainText('저장됨');
+
+    const file = await downloadAs(page, /^HWP로 내려받기/);
+    expect(file.name).toBe('sample_수정본.hwp');
+    const paras = readHwp(file.bytes);
+    expect(paras.map((p) => p.sizePt)).toEqual([18, 10, 10, 10, 10]);
+    expect(paras.map((p) => p.text)).toEqual(SAMPLE_LINES); // 글은 그대로
+  });
+
+  test('적용한 서식 변경을 되돌리면 파일도 원래대로 돌아간다', async ({ page }) => {
+    await openFile(page, makeHwp('hwp'));
+    await page.getByRole('tab', { name: /서식 점검/ }).click();
+    await page.getByRole('button', { name: '변경 내역에 올리기' }).click();
+    const card = page.getByTestId('proposal-card').first();
+    await card.getByRole('button', { name: '적용' }).click();
+    await expect(card).toContainText('적용됨');
+    await card.getByRole('button', { name: '되돌리기' }).click();
+    await expect(card.getByRole('button', { name: '적용' })).toBeVisible();
+    const file = await downloadAs(page, /^HWP로 내려받기/);
+    expect(readHwp(file.bytes).map((p) => p.sizePt)).toEqual([18, 10, 10, 13, 10]);
+  });
+
+  test('AI 제안(맞춤법)을 전체 적용하면 같은 문단의 제안도 모두 적용되고 파일에 반영된다', async ({ page }) => {
+    await loginAs(page);
+    await openFile(page, makeHwp('hwp'));
+    await askAi(page, '맞춤법');
+    await page.getByRole('button', { name: '변경 내역 보기' }).click();
+    await expect(page.getByTestId('proposal-card')).toHaveCount(2);
+    await page.getByRole('button', { name: '전체 적용' }).click();
+    await expect(page.locator('.toast').last()).toContainText('2개를 적용했어요');
+
+    const file = await downloadAs(page, /^HWP로 내려받기/);
+    const last = readHwp(file.bytes).at(-1);
+    expect(last?.text).toBe('본문 문장입니다. 며칠 뒤에 만나요. 하려고 했어요.');
+  });
+
+  test('HWPX 로 열면 HWPX 로 저장하고, 다른 형식으로 변환해 내려받을 수도 있다', async ({ page }) => {
+    await openFile(page, makeHwp('hwpx'));
+    await page.getByRole('tab', { name: /서식 점검/ }).click();
+    await page.getByRole('button', { name: '변경 내역에 올리기' }).click();
+    await page.getByTestId('proposal-card').first().getByRole('button', { name: '적용' }).click();
+    await expect(page.getByTestId('proposal-card').first()).toContainText('적용됨');
+
+    const hwpx = await downloadAs(page, /^HWPX로 내려받기/);
+    expect(hwpx.name).toBe('sample_수정본.hwpx');
+    expect(readHwp(hwpx.bytes).map((p) => p.sizePt)).toEqual([18, 10, 10, 10, 10]);
+
+    const converted = await downloadAs(page, /^HWP\(변환\)으로 내려받기/);
+    expect(converted.name).toBe('sample_수정본.hwp');
+    expect(readHwp(converted.bytes).map((p) => p.sizePt)).toEqual([18, 10, 10, 10, 10]);
+  });
+
+  test('편집기에서 직접 고친 글을 AI 가 읽는다', async ({ page }) => {
+    await loginAs(page);
+    await openFile(page, makeHwp('hwp'));
+    const frame = studio(page);
+    // 문서 끝에 오탈자를 직접 입력한다.
+    await frame.locator('canvas.document-page-canvas').first().click({ position: { x: 300, y: 200 } });
+    await page.keyboard.press('Control+End');
+    await page.keyboard.insertText(' 오랫만이에요');
+    await expect(page.locator('.save-state')).toContainText('저장됨');
+    await expect.poll(async () => (await page.locator('.save-state').innerText()).includes('저장 중')).toBe(false);
+
+    await askAi(page, '맞춤법');
+    await page.getByRole('button', { name: '변경 내역 보기' }).click();
+    await expect(page.getByTestId('proposal-card').filter({ hasText: '"오랫만" 고치기' })).toBeVisible();
+  });
+
+  test('편집기에서 고친 내용은 자동 저장되어 새로고침해도 남는다', async ({ page }) => {
+    await openFile(page, makeHwp('hwp'));
+    const frame = studio(page);
+    await frame.locator('canvas.document-page-canvas').first().click({ position: { x: 300, y: 200 } });
+    await page.keyboard.press('Control+End');
+    await page.keyboard.insertText(' 추가한 글');
+    await expect.poll(async () => (await page.locator('.save-state').innerText()).includes('저장됨')).toBe(true);
+    await page.waitForTimeout(2500); // 변경 감지(1초 간격)와 저장(0.8초 뒤)이 끝날 때까지
+    await page.reload();
+    await expect(page.getByRole('button', { name: '내려받기' })).toBeEnabled({ timeout: 30_000 });
+    const file = await downloadAs(page, /^HWP로 내려받기/);
+    expect(readHwp(file.bytes).at(-1)?.text).toContain('추가한 글');
+  });
+
+  test('깨진 한글 파일은 알아듣기 쉬운 안내를 보여 준다', async ({ page }) => {
+    await openFile(page, { name: `깨짐-${unique()}.hwp`, mimeType: 'application/octet-stream', buffer: Buffer.from('이건 한글 파일이 아니에요') }, { ready: false });
+    await expect(page.locator('.engine-error')).toContainText('한글 편집기를 열지 못했어요', { timeout: 30_000 });
+  });
+
+  test('야간 모드를 켜 두었다면 편집기도 어두운 화면으로 열린다', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: '야간 모드' }).click();
+    await openFile(page, makeHwp('hwp'));
+    await expect.poll(async () => page.locator('.hwp-host iframe').evaluate((f) => (f as HTMLIFrameElement).contentDocument?.documentElement.dataset.themeEffective)).toBe('dark');
+  });
+});

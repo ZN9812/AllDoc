@@ -339,3 +339,29 @@
     padding: 24px 20px;
   }
 }
+
+/* 한글 편집기(rhwp-studio)는 iframe 안에 열린다. AI 변경을 적용하는 동안에는 위에 막을 씌워 입력을 막는다. */
+.hwp-engine .hwp-host {
+  position: absolute;
+  inset: 0;
+}
+
+.hwp-engine .hwp-host iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.engine-busy {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 16, 32, 0.28);
+  color: #fff;
+  font-weight: 700;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}

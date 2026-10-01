@@ -9,6 +9,8 @@ export const CharStyleSchema = z.object({
   bold: z.boolean().optional(),
   italic: z.boolean().optional(),
   underline: z.boolean().optional(),
+  /** 되돌리기용: 언어별 글꼴 7칸. 편집기 연결부가 만들며 AI 는 쓰지 않는다. */
+  fontFaces: z.array(z.string()).length(7).optional(),
 });
 export type CharStyle = z.infer<typeof CharStyleSchema>;
 
@@ -20,6 +22,10 @@ export const ParaStyleSchema = z.object({
   align: z.enum(ALIGNS).optional(),
   /** 줄 간격 퍼센트(160 = 160%) */
   lineSpacingPct: z.number().optional(),
+  /** 되돌리기용: 한글이 쓰던 정렬 이름(distribute 등 4가지에 없는 값 포함). 편집기 연결부가 만들며 AI 는 쓰지 않는다. */
+  rawAlign: z.string().optional(),
+  /** 되돌리기용: 한글이 쓰던 줄 간격 방식과 값(고정·최소 등 퍼센트가 아닌 방식 포함). */
+  rawLineSpacing: z.object({ type: z.string(), value: z.number() }).optional(),
 });
 export type ParaStyle = z.infer<typeof ParaStyleSchema>;
 

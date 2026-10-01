@@ -20,3 +20,7 @@ test-results/
 # 빌드 전에 복사하는 pdf.js 보조 파일
 web/public/pdfjs/
 e2e/.data/
+
+# 빌드 전에 준비하는 한글 편집기(rhwp-studio)와 그 소스 캐시
+web/public/rhwp-studio/
+.cache/
