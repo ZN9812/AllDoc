@@ -2,7 +2,7 @@ import { createStudio, type RhwpEditor } from '@rhwp/editor';
 import { useEffect, useRef, useState } from 'react';
 import { KIND_MIME } from '@alldoc/shared';
 import { loadHwpCore } from './hwp/core';
-import { HwpModel, type HwpFormat } from './hwp/model';
+import { HwpModel, type CellFocus, type HwpFormat } from './hwp/model';
 import type { ApplyFailure, EngineHandle, EngineProps, ExportOption } from './types';
 
 /** 우리 서버가 내려주는 한글 편집기(rhwp-studio). 빌드 때 web/public/rhwp-studio 로 들어간다. */
@@ -39,6 +39,19 @@ async function studioInstalled(): Promise<boolean> {
 }
 
 const failed = (message: string): ApplyFailure => ({ ok: false, reason: 'failed', message });
+
+/** 빌드 때 편집기에 끼운 이동 함수(window.__alldocFocusCell). 편집기가 같은 출처에서 열리므로 우리 앱이 직접 부를 수 있다. */
+type FocusCell = (position: CellFocus['position'], end?: number) => boolean;
+
+/** 편집기를 표 칸으로 이동시킨다. 이동 함수가 없거나(패치 없이 빌드) 이동하지 못하면 false. */
+function focusCell(studio: RhwpEditor, cell: CellFocus): boolean {
+  try {
+    const fn = (studio.element.contentWindow as (Window & { __alldocFocusCell?: FocusCell }) | null)?.__alldocFocusCell;
+    return typeof fn === 'function' && fn(cell.position, cell.end) === true;
+  } catch {
+    return false;
+  }
+}
 
 /** HWP·HWPX: 화면은 자체 호스팅한 한글 편집기(rhwp-studio), AI 의 문단·서식 읽기와 고치기는 화면 없는 코어가 맡는다. */
 export default function HwpEngine({ doc, onReady, onDirty, onPages, onError, onNotice }: EngineProps) {
@@ -179,16 +192,34 @@ export default function HwpEngine({ doc, onReady, onDirty, onPages, onError, onN
           },
           // 편집기 화면은 별도 문서(iframe)라서 AI 가 고칠 곳을 문서 위에 겹쳐 표시하지는 못한다. 변경 내역 카드로 확인하고,
           // "문서에서 보기"를 누르면 편집기가 그 문단으로 이동한다.
-          // 편집기는 본문 문단으로만 이동할 수 있어서, 표 안의 문단은 그 표가 놓인 본문 문단으로 이동하고 그렇다고 알린다.
+          // 표 안의 문단은 편집기의 공개 이동 수단(본문 문단만 받는다) 대신, 빌드 때 편집기에 끼운 이동 함수(build-rhwp-studio.mjs 의 패치)로
+          // 그 칸(안쪽 표 포함)으로 이동해 고칠 글을 선택한다. 그 함수가 없거나 이동하지 못하면 그 표가 놓인 본문 문단으로 이동하고 그렇다고 알린다.
           setHighlights: () => undefined,
           reveal: (t) => {
             void (async () => {
               try {
-                const loc = (await sync()).paragraphTarget(t.paragraph);
+                const m = await sync();
+                const cell = m.cellFocus(t.paragraph, t.find);
+                if (cell && !cell.tooBig && focusCell(studio as RhwpEditor, cell)) return;
+                const loc = m.paragraphTarget(t.paragraph);
                 if (!loc) return;
-                const r = await (studio as RhwpEditor).focusTarget({ kind: 'body_paragraph', section: loc.section, paragraph: loc.paragraph, charOffset: 0, length: loc.length });
+                let focused = false;
+                try {
+                  focused = (await (studio as RhwpEditor).focusTarget({ kind: 'body_paragraph', section: loc.section, paragraph: loc.paragraph, charOffset: 0, length: loc.length })).focused;
+                } catch {
+                  // 편집기가 이 문단으로의 이동을 거절했다.
+                }
                 if (loc.inTable) {
-                  onNotice?.(r.focused ? '표 안의 글이에요. 한글 편집기가 칸으로 바로 이동하지는 못해서, 그 표가 있는 곳으로 이동했어요. 카드에 적힌 행·열을 보세요.' : '표가 있는 곳으로 이동하지 못했어요. 카드에 적힌 표·행·열을 보고 직접 찾아 주세요.');
+                  const big = '이 표는 아주 커서, 칸으로 바로 이동하면 화면이 오래 멈춰요.';
+                  onNotice?.(
+                    focused
+                      ? cell?.tooBig
+                        ? `${big} 그 표가 있는 곳으로 이동했어요. 카드에 적힌 행·열을 보세요.`
+                        : '표 안의 글이에요. 한글 편집기가 칸으로 바로 이동하지는 못해서, 그 표가 있는 곳으로 이동했어요. 카드에 적힌 행·열을 보세요.'
+                      : cell?.tooBig
+                        ? `${big} 그 표가 있는 곳으로도 이동하지 못했어요. 카드에 적힌 표·행·열을 보고 직접 찾아 주세요.`
+                        : '표가 있는 곳으로 이동하지 못했어요. 카드에 적힌 표·행·열을 보고 직접 찾아 주세요.',
+                  );
                 }
               } catch {
                 // 위치를 보여 주지 못해도 편집에는 영향이 없다.

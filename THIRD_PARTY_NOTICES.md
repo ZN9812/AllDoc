@@ -39,7 +39,7 @@ SuperDoc의 문의처는 패키지의 `NOTICE.md`에 `legal@superdoc.dev`로 적
 
 | 부품 | 버전 | 라이선스 | 쓰임 |
 | --- | --- | --- | --- |
-| [rhwp](https://github.com/edwardkim/rhwp) 편집기(rhwp-studio) | v0.8.6 (커밋 `f1f9c6ae`) | MIT | HWP·HWPX 편집 화면. 정해 둔 커밋의 소스를 빌드 때 받아 **우리 서버에서 직접 제공**합니다(제3자 사이트로 문서가 넘어가지 않도록). |
+| [rhwp](https://github.com/edwardkim/rhwp) 편집기(rhwp-studio) | v0.8.6 (커밋 `f1f9c6ae`) | MIT | HWP·HWPX 편집 화면. 정해 둔 커밋의 소스를 빌드 때 받아 **우리 서버에서 직접 제공**합니다(제3자 사이트로 문서가 넘어가지 않도록). 소스에는 "끼워 넣기"만 하는 작은 패치 하나를 적용합니다(표 칸으로 이동하는 함수를 앱이 부를 수 있게 노출. `web/scripts/build-rhwp-studio.mjs`의 `PATCHES`). 고친 곳에는 `AllDoc 패치` 표시가 있고, 나머지 소스는 그대로입니다. |
 | `@rhwp/core` | 0.8.6 | MIT | HWP·HWPX를 읽고 고치는 WASM(AI·서식 점검·기준 문서) |
 | `@rhwp/editor` | 0.8.6 | MIT | 편집기 화면과 앱을 잇는 작은 연결 코드 |
 | [pdf.js](https://mozilla.github.io/pdf.js/) `pdfjs-dist` | 6.3.289 | Apache-2.0 | PDF 보기 |

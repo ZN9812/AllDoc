@@ -37,6 +37,8 @@ jobs:
         env:
           # 설치에 실패했을 때 그 시험이 조용히 건너뛰어지지 않고 실패하도록 한다.
           REQUIRE_SOFFICE: "1"
+          # 실제 한글 문서의 표 칸으로 이동하는 시험(e2e/hwp-corpus-reveal.spec.ts)도 예제 문서가 없으면 건너뛰지 않고 실패한다.
+          REQUIRE_HWP_SAMPLES: "1"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

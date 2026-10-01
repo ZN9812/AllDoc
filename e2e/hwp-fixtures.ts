@@ -179,3 +179,18 @@ export function makeHwpWithTable(format: 'hwp' | 'hwpx' = 'hwp', name = `form.${
   const bytes = format === 'hwpx' ? d.exportHwpx() : d.exportHwp();
   return { name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) };
 }
+
+/**
+ * 가장 바깥 표 하나에 문단이 260개 든 한글 문서(한글 편집기가 칸으로 이동하면 화면이 오래 멈추는 크기라서 앱이 칸 이동을 하지 않는다).
+ * 오탈자("몇일")는 150번째 줄에만 있다(한 제안의 변경이 60개를 넘으면 서버가 버린다).
+ */
+export function makeHwpWithBigTable(rows = 260): Upload {
+  const Doc = core();
+  const d = Doc.createEmpty();
+  d.createBlankDocument();
+  d.insertText(0, 0, 0, '큰 표');
+  d.splitParagraph(0, 0, d.getParagraphLength(0, 0));
+  const t = JSON.parse(d.createTable(0, 1, 0, rows, 1)) as { paraIdx: number; controlIdx: number };
+  for (let r = 0; r < rows; r++) d.insertTextInCell(0, t.paraIdx, t.controlIdx, r, 0, 0, r === 149 ? '150번째 줄 몇일 뒤' : `${r + 1}번째 줄`);
+  return { name: 'big-table.hwp', mimeType: 'application/octet-stream', buffer: Buffer.from(d.exportHwp()) };
+}

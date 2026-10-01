@@ -70,7 +70,7 @@ export interface ExportReportLike {
 export type HwpFormat = 'hwp' | 'hwpx';
 
 /** 표 안으로 한 단계 들어가는 길: 문단 안의 컨트롤(표) 번호, 그 표의 칸 번호, 칸 안의 문단 번호 */
-interface CellStep {
+export interface CellStep {
   controlIndex: number;
   cellIndex: number;
   cellParaIndex: number;
@@ -91,9 +91,29 @@ interface CellSlot {
   /** path 를 JSON 으로 만든 것(코어에 넘기는 값이라 한 번만 만든다) */
   pathJson: string;
   place: CellPlace;
+  /** 이 칸이 든 가장 바깥 표 하나에 있는 문단의 수(안쪽 표 포함) */
+  tableWeight: number;
 }
 
 type Slot = BodySlot | CellSlot;
+
+/** 편집기가 표 칸으로 이동할 때 받는 위치(편집기의 DocumentPosition 과 같은 모양) */
+export interface CellFocus {
+  position: {
+    sectionIndex: number;
+    paragraphIndex: number;
+    charOffset: number;
+    parentParaIndex: number;
+    controlIndex: number;
+    cellIndex: number;
+    cellParaIndex: number;
+    cellPath?: CellStep[];
+  };
+  /** 선택할 글의 끝(없으면 캐럿만 놓는다) */
+  end?: number;
+  /** 가장 바깥 표가 너무 커서(MAX_FOCUS_TABLE_PARAGRAPHS) 칸으로 이동하면 화면이 오래 멈춘다. 이동하지 않는다. */
+  tooBig?: boolean;
+}
 
 const ALIGNS: readonly string[] = ['left', 'center', 'right', 'justify'];
 
@@ -102,6 +122,12 @@ const MAX_TABLE_DEPTH = 8;
 const MAX_SLOTS = 200_000;
 /** 한 문단 안의 컨트롤을 이 수까지만 살핀다. */
 const MAX_CONTROLS_PER_PARAGRAPH = 64;
+/**
+ * 편집기를 표 칸으로 이동시키는 데 걸리는 시간은 가장 바깥 표의 크기에 따라 크게 달라진다. 실제 문서 11개(표 하나당 문단 70개 이하)에서는
+ * 글을 선택해도 3~22ms 였지만, 한 표에 문단이 1,588개 든 문서에서는 선택하면 칸 크기와 상관없이 약 13초, 캐럿만 옮겨도 칸에 따라 최대 8초가 걸렸다
+ * (그동안 편집기와 우리 앱 화면이 모두 멈춘다). 그래서 가장 바깥 표의 문단이 이 수를 넘으면 칸으로 이동하지 않는다(그 표가 있는 곳으로 안내한다).
+ */
+export const MAX_FOCUS_TABLE_PARAGRAPHS = 250;
 /** 코어가 "그 컨트롤은 표가 아니다"라고 알리는 오류 문구(표가 아닌 컨트롤 뒤에 표가 있을 수 있어 계속 살핀다). 다른 오류는 거기서 멈춘다. */
 const NOT_A_TABLE = /표가 아닙니다|not a table/i;
 
@@ -197,7 +223,7 @@ export class HwpModel {
           for (let q = 0; q < count; q++) {
             if (out.length >= MAX_SLOTS) return;
             const path = [...base, { controlIndex: last.controlIndex, cellIndex: k, cellParaIndex: q }];
-            out.push({ kind: 'cell', sec, host, path, pathJson: JSON.stringify(path), place: { table: number, row: info.row + 1, col: info.col + 1, depth } });
+            out.push({ kind: 'cell', sec, host, path, pathJson: JSON.stringify(path), place: { table: number, row: info.row + 1, col: info.col + 1, depth }, tableWeight: 0 });
             if (probeNested) visitNested(sec, host, path, depth);
           }
         }
@@ -238,7 +264,10 @@ export class HwpModel {
           } catch {
             continue; // 표가 아닌 컨트롤(구역 설정, 그림 등)
           }
+          const first = out.length;
           visitTable(s, p, [{ controlIndex: c, cellIndex: 0, cellParaIndex: 0 }], 1);
+          // 이 표(안쪽 표 포함)가 담은 칸 문단은 모두 방금 더해진 것들이다.
+          for (let k = first; k < out.length; k++) (out[k] as CellSlot).tableWeight = out.length - first;
         }
       }
     }
@@ -271,6 +300,43 @@ export class HwpModel {
     if (!slot) return null;
     const para = slot.kind === 'body' ? slot.para : slot.host;
     return { section: slot.sec, paragraph: para, length: this.doc.getParagraphLength(slot.sec, para), inTable: slot.kind === 'cell' };
+  }
+
+  /**
+   * 편집기를 이 문단(표 칸 안)으로 이동시키는 데 쓰는 위치. 본문 문단이면 null.
+   * find 가 이 문단에 들어 있으면 그 글을 선택하도록 선택 끝(end)도 준다(위치와 길이는 코어의 글자 수 기준).
+   * 위치 모양은 편집기의 DocumentPosition 과 같다: 평평한 칸 좌표는 바깥 표 기준이고, 안쪽 표는 cellPath 에 전체 경로가 있다.
+   */
+  cellFocus(index: number, find?: string): CellFocus | null {
+    const slot = this.locate(index);
+    if (!slot || slot.kind !== 'cell') return null;
+    const first = slot.path[0] as CellStep;
+    let start = 0;
+    let end: number | undefined;
+    if (find) {
+      const text = this.text(slot);
+      const at = text.indexOf(find);
+      if (at >= 0) {
+        start = codePointLength(text.slice(0, at));
+        end = start + codePointLength(find);
+      }
+    }
+    const tooBig = slot.tableWeight > MAX_FOCUS_TABLE_PARAGRAPHS;
+    if (tooBig) end = undefined;
+    return {
+      position: {
+        sectionIndex: slot.sec,
+        paragraphIndex: slot.host,
+        charOffset: start,
+        parentParaIndex: slot.host,
+        controlIndex: first.controlIndex,
+        cellIndex: first.cellIndex,
+        cellParaIndex: first.cellParaIndex,
+        ...(slot.path.length > 1 ? { cellPath: slot.path.map((step) => ({ ...step })) } : {}),
+      },
+      ...(end !== undefined ? { end } : {}),
+      ...(tooBig ? { tooBig: true } : {}),
+    };
   }
 
   // ───────────────────────── 문단 칸 읽기·쓰기(본문과 표 칸을 같은 방식으로) ─────────────────────────

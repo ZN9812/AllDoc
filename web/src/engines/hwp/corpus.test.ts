@@ -15,6 +15,9 @@ const DIR = process.env.RHWP_SAMPLES_DIR || join(__dirname, '../../../../.cache/
 const REQUIRED = process.env.REQUIRE_HWP_SAMPLES === '1';
 const files = existsSync(DIR) ? readdirSync(DIR).filter((n) => /\.(hwp|hwpx)$/i.test(n)).sort() : [];
 
+/** 가장 바깥 표 하나에 문단이 1,588개 든 문서(칸 하나에 약 1,300개). 표 안의 글을 편집기에서 선택해 보여 주는 데 13초가 걸린다. */
+const GIANT = 'issue1949_giant_cell_nested_tables_perf.hwp';
+
 const kindOf = (name: string): HwpFormat => (name.toLowerCase().endsWith('x') ? 'hwpx' : 'hwp');
 const texts = (m: HwpModel): string[] => m.summarize().paragraphs.map((p) => p.text);
 
@@ -128,9 +131,23 @@ describe.skipIf(files.length === 0 && !REQUIRED)('실제 한글 문서(예제 �
     expect(model.summarize().paragraphs).toEqual(before.paragraphs);
   }, 120_000);
 
+  // 편집기를 표 칸으로 이동시키는 데 걸리는 시간은 가장 바깥 표의 크기에 달려 있다. 실제 편집기(브라우저)에서 재어 보니
+  // 이 문서만(가장 바깥 표 하나에 문단 1,588개) 선택하면 13초, 캐럿만 옮겨도 칸에 따라 8초가 걸렸고, 나머지 문서는 표마다 3~22ms 였다. 그 기준이 문서마다 맞게 적용되는지 본다.
+  it.each(files)('%s: 표 칸으로 이동하는 위치를 주고, 아주 큰 표에서만 이동하지 않도록 알린다', (name) => {
+    const { Doc, bytes, kind } = open(name);
+    const model = new HwpModel(new Doc(bytes), kind);
+    const picked = pickCells(model.summarize().paragraphs, 6);
+    for (const p of picked) {
+      const find = [...p.text].slice(1, 4).join('');
+      const f = model.cellFocus(p.index, find);
+      expect(f, `문단 ${p.index} 의 이동 위치가 없어요`).not.toBeNull();
+      expect(f?.position.cellPath === undefined, '안쪽 표 경로는 깊이 2 부터 있다').toBe((p.cell?.depth ?? 0) === 1);
+      expect(f?.tooBig === true, `${name} 문단 ${p.index}`).toBe(name === GIANT);
+    }
+  });
+
   // 표 하나가 문단 2500개짜리 칸을 가진 문서. 변경마다 쪽 나누기를 다시 계산하면 한 건에 약 0.45초가 걸려 150건이면 70초가 넘는다.
   // 묶음 모드로 끝에 한 번만 계산하면 1초 안팎이다. 느린 환경에서도 구분되도록 넉넉하게 20초를 상한으로 둔다.
-  const GIANT = 'issue1949_giant_cell_nested_tables_perf.hwp';
   it.skipIf(!files.includes(GIANT))('거대한 표 문서에서도 표 안의 글 150곳을 한 묶음으로 빠르게 고친다', async () => {
     const { Doc, bytes, kind } = open(GIANT);
     const model = new HwpModel(new Doc(bytes), kind);

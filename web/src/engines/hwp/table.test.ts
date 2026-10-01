@@ -2,7 +2,7 @@
 // 표 칸 안의 글(표 안의 표 포함)을 읽고 고치는 시험. 코어가 만든 문서를 파일로 내보냈다가 다시 열어 쓰므로 실제 파일을 여는 것과 같은 경로를 탄다.
 import { textGuard, type DocSummary, type Op } from '@alldoc/shared';
 import { describe, expect, it } from 'vitest';
-import { HwpModel, type HwpDocLike } from './model';
+import { HwpModel, MAX_FOCUS_TABLE_PARAGRAPHS, type HwpDocLike } from './model';
 import { loadNodeCore, openTableSample, type TableSampleSpec } from './testing';
 
 // 본문 0 제목, 1 안내, 2 (표가 놓인 빈 문단), 표 칸 3~6, 7 맺음
@@ -76,6 +76,78 @@ describe('표 칸 안의 문단 읽기', () => {
     const target = model.paragraphTarget(indexOf(model, '홍길동'));
     expect(target).toMatchObject({ section: 0, paragraph: 2, inTable: true });
     expect(model.paragraphTarget(999)).toBeNull();
+  });
+});
+
+describe('편집기를 표 칸으로 이동시키는 위치', () => {
+  const step = (cellIndex: number) => ({ controlIndex: 0, cellIndex, cellParaIndex: 0 });
+
+  it('본문 문단과 없는 문단은 위치가 없다(본문은 편집기의 공개 이동 수단으로 간다)', () => {
+    const { model } = openTableSample(NESTED);
+    expect(model.cellFocus(indexOf(model, '제목 문단'))).toBeNull();
+    expect(model.cellFocus(999)).toBeNull();
+  });
+
+  it('바깥 표 칸은 칸 좌표를, 안쪽 표 칸은 전체 경로(cellPath)까지 준다', () => {
+    const { model } = openTableSample(NESTED);
+    // 표는 본문 문단 2 에 놓여 있다(0 제목, 1 안내, 2 표).
+    expect(model.cellFocus(indexOf(model, '몇일 동안 휴가를 할려고 합니다'))).toEqual({
+      position: { sectionIndex: 0, paragraphIndex: 2, charOffset: 0, parentParaIndex: 2, controlIndex: 0, cellIndex: 3, cellParaIndex: 0 },
+    });
+    // 안쪽 표는 바깥 표 2번 칸(홍길동)의 첫 문단에 놓여 있다. 평평한 좌표는 바깥 표 기준이다.
+    expect(model.cellFocus(indexOf(model, '안쪽 몇일 나'))).toEqual({
+      position: {
+        sectionIndex: 0,
+        paragraphIndex: 2,
+        charOffset: 0,
+        parentParaIndex: 2,
+        controlIndex: 0,
+        cellIndex: 1,
+        cellParaIndex: 0,
+        cellPath: [step(1), step(1)],
+      },
+    });
+  });
+
+  it('고칠 글(find)이 문단에 있으면 그 글을 선택하도록 시작과 끝을 글자 수로 준다', () => {
+    const { model } = openTableSample(NESTED);
+    const i = indexOf(model, '몇일 동안 휴가를 할려고 합니다');
+    // "몇일 동안 휴가를 " 이 10글자라서 "할려고" 는 10~13
+    expect(model.cellFocus(i, '할려고')).toMatchObject({ position: { charOffset: 10 }, end: 13 });
+    // 문단에 없는 글이면 문단 앞에 캐럿만 놓는다.
+    const none = model.cellFocus(i, '없는글');
+    expect(none?.position.charOffset).toBe(0);
+    expect(none?.end).toBeUndefined();
+  });
+
+  it('위치와 길이는 UTF-16 이 아니라 글자(코드 포인트) 수로 센다', () => {
+    const { model } = openTableSample({ cells: [['𠮷𠮷 몇일 뒤']] });
+    const i = indexOf(model, '𠮷𠮷 몇일 뒤');
+    // 𠮷 은 UTF-16 으로 2칸이지만 한 글자다.
+    expect(model.cellFocus(i, '몇일')).toMatchObject({ position: { charOffset: 3 }, end: 5 });
+  });
+
+  it('가장 바깥 표의 문단이 250개를 넘으면 칸으로 이동하지 않도록 알린다(편집기가 오래 멈춘다)', () => {
+    const rows = Array.from({ length: MAX_FOCUS_TABLE_PARAGRAPHS + 10 }, (_, k) => [`${k}번째 줄 몇일`]);
+    const { model } = openTableSample({ cells: rows, after: ['뒤 문단'] });
+    const f = model.cellFocus(indexOf(model, '3번째 줄 몇일'), '몇일');
+    expect(f?.tooBig).toBe(true);
+    expect(f?.end).toBeUndefined();
+    // 작은 표는 그대로 이동한다.
+    const small = openTableSample({ cells: [['가 몇일']] });
+    const g = small.model.cellFocus(indexOf(small.model, '가 몇일'), '몇일');
+    expect(g).toMatchObject({ end: 4 });
+    expect(g?.tooBig).toBeUndefined();
+  });
+
+  it('표 크기는 안쪽 표까지 합쳐 가장 바깥 표 하나를 기준으로 센다', () => {
+    // 바깥 표 하나(칸 1개)가 안쪽 표 260칸을 품은 문서: 바깥 표 칸의 글도 큰 표에 든 것으로 본다.
+    const { model } = openTableSample({
+      cells: [['바깥 몇일']],
+      nested: { at: [0, 0], cells: Array.from({ length: MAX_FOCUS_TABLE_PARAGRAPHS + 10 }, (_, k) => [`안쪽 ${k}`]) },
+    });
+    expect(model.cellFocus(indexOf(model, '바깥 몇일'), '몇일')?.tooBig).toBe(true);
+    expect(model.cellFocus(indexOf(model, '안쪽 5'), '쪽')?.tooBig).toBe(true);
   });
 });
 
@@ -205,7 +277,20 @@ describe('표 칸 안의 서식', () => {
     }
   });
 
-  it('표 안의 표 칸의 문단 서식은 코어가 읽고 쓰는 길이 없어서 바꾸지 않고 이유를 알린다', async () => {
+  it('코어는 표 안의 표 칸의 문단 서식 쓰기를 아직 거절한다(칸 번호를 쓰는 함수로도 마찬가지). 지원하게 되면 이 시험이 실패하니, 그때 모델의 제한을 푼다', () => {
+    const { doc } = openTableSample(NESTED);
+    const core = doc as unknown as { getCursorModel(): string; applyParaFormatAtCursor(list: number, para: number, json: string): string };
+    const lists = (JSON.parse(core.getCursorModel()) as { lists: Array<{ listId: number; hostListId: number }> }).lists;
+    const props = JSON.stringify({ alignment: 'center' });
+    const nested = lists.find((l) => l.hostListId !== 0);
+    expect(nested, '안쪽 표 칸의 목록을 찾지 못했어요').toBeDefined();
+    expect(() => core.applyParaFormatAtCursor((nested as { listId: number }).listId, 0, props)).toThrow(/중첩 셀/);
+    // 본문에 놓인 표의 칸은 같은 함수로 된다.
+    const outer = lists.find((l) => l.hostListId === 0);
+    expect(JSON.parse(core.applyParaFormatAtCursor((outer as { listId: number }).listId, 0, props))).toMatchObject({ ok: true });
+  });
+
+  it('표 안의 표 칸의 문단 서식은 코어가 쓰기를 거절해서 바꾸지 않고 이유를 알린다', async () => {
     const { model } = openTableSample(NESTED);
     const i = indexOf(model, '안쪽 가');
     expect(byText(model.summarize(), '안쪽 가')?.para).toEqual({}); // 정렬·줄 간격을 알 수 없다
