@@ -12,6 +12,7 @@ export default function ChatPane({ kind }: { kind: DocKind }) {
   const aiEnabled = useSettings((s) => s.aiEnabled);
   const thread = useEditor((s) => s.thread);
   const busy = useEditor((s) => s.busy);
+  const engine = useEditor((s) => s.engine);
   const setTab = useEditor((s) => s.setTab);
   const [text, setText] = useState('');
   const box = useRef<HTMLDivElement>(null);
@@ -89,8 +90,16 @@ export default function ChatPane({ kind }: { kind: DocKind }) {
         {busy && <div className="bub">AI가 문서를 살펴보는 중이에요…</div>}
       </div>
       <form className="ask" onSubmit={onSubmit}>
-        <input type="text" value={text} onChange={(e) => setText(e.target.value)} placeholder="AI에게 시키기" aria-label="AI에게 시키기" disabled={busy} autoComplete="off" />
-        <button type="submit" className="btn primary" disabled={busy || text.trim().length === 0}>
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={engine ? 'AI에게 시키기' : '문서를 여는 중…'}
+          aria-label="AI에게 시키기"
+          disabled={busy || !engine}
+          autoComplete="off"
+        />
+        <button type="submit" className="btn primary" disabled={busy || !engine || text.trim().length === 0}>
           보내기
         </button>
       </form>

@@ -24,7 +24,11 @@ type CallOptions = Pick<AiRequest, 'mode' | 'instruction'> & Partial<Pick<AiRequ
 async function callAi(opts: CallOptions, userMessage: string): Promise<boolean> {
   const ed = useEditor.getState();
   const engine = ed.engine;
-  if (!engine || ed.busy) return false;
+  if (ed.busy) return false;
+  if (!engine) {
+    toast('문서를 아직 여는 중이에요. 잠시 뒤에 다시 시도해 주세요.', 'error');
+    return false;
+  }
 
   const avail = aiAvailability(useAuth.getState().me, useSettings.getState().aiEnabled);
   if (!avail.ok) {

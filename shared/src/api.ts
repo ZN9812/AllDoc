@@ -72,4 +72,8 @@ export const ERROR_CODES = {
   aiUnavailable: 'ai_unavailable',
   aiRefused: 'ai_refused',
   aiFailed: 'ai_failed',
+  /** 같은 사용자의 AI 요청이 아직 처리 중일 때 */
+  busy: 'busy',
+  forbidden: 'forbidden',
+  internal: 'internal',
 } as const;

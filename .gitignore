@@ -19,3 +19,4 @@ test-results/
 
 # 빌드 전에 복사하는 pdf.js 보조 파일
 web/public/pdfjs/
+e2e/.data/

@@ -1,5 +1,5 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from 'react';
-import type { DocKind } from '@alldoc/shared';
+import { isFormatKind, type DocKind } from '@alldoc/shared';
 import type { EngineProps } from './types';
 
 type EngineComponent = LazyExoticComponent<ComponentType<EngineProps>>;
@@ -20,5 +20,5 @@ export function engineFor(kind: DocKind): EngineComponent {
 
 /** 서식(글꼴·크기 등)을 읽고 고칠 수 있는 형식인지(서식 점검 대상) */
 export function supportsFormat(kind: DocKind): boolean {
-  return kind === 'hwp' || kind === 'hwpx' || kind === 'docx';
+  return isFormatKind(kind);
 }

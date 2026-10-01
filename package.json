@@ -20,7 +20,7 @@
     "start": "npm run start -w server",
     "typecheck": "npm run typecheck -w shared -w web -w server",
     "test": "npm run test -w shared -w web -w server",
-    "test:e2e": "playwright test",
+    "test:e2e": "npm run build && playwright test",
     "check": "npm run typecheck && npm run test"
   },
   "devDependencies": {

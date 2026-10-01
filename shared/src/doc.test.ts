@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { baseName, extOf, isAiTarget, kindFromName } from './doc';
+import { baseName, extOf, isAiTarget, isFormatKind, kindFromName } from './doc';
 
 describe('파일 형식 판별', () => {
   it('확장자로 형식을 찾는다(대소문자 무시)', () => {
@@ -26,5 +26,12 @@ describe('파일 형식 판별', () => {
   it('PDF 는 AI 대상이 아니다', () => {
     expect(isAiTarget('pdf')).toBe(false);
     expect(isAiTarget('hwp')).toBe(true);
+  });
+});
+
+describe('서식을 다룰 수 있는 형식', () => {
+  it('한글과 Word 만 서식 점검 대상이다', () => {
+    expect(['hwp', 'hwpx', 'docx'].every((k) => isFormatKind(k as 'hwp'))).toBe(true);
+    expect(['pdf', 'txt', 'md'].some((k) => isFormatKind(k as 'pdf'))).toBe(false);
   });
 });

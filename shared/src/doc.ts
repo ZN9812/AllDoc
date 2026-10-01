@@ -62,3 +62,8 @@ export function isAiTarget(kind: DocKind): boolean {
 export function isEditable(kind: DocKind): boolean {
   return kind !== 'pdf';
 }
+
+/** 글꼴·크기 같은 서식을 읽고 고칠 수 있는 형식인지(서식 점검과 서식 변경 제안의 대상) */
+export function isFormatKind(kind: DocKind): boolean {
+  return kind === 'hwp' || kind === 'hwpx' || kind === 'docx';
+}

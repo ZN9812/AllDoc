@@ -324,6 +324,11 @@
 }
 
 @media (max-width: 700px) {
+  .tb {
+    min-width: 36px;
+    height: 36px;
+  }
+
   .canvas {
     padding: 14px 10px 0;
   }

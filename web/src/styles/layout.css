@@ -443,3 +443,45 @@
     display: none;
   }
 }
+
+.theme-toggle {
+  gap: 6px;
+}
+
+/* 휴대폰: 손가락으로 누르기 쉽게 키우고, 위쪽 바가 좁아도 문서 이름이 보이게 글자를 줄인다 */
+@media (max-width: 700px) {
+  .btn {
+    height: 40px;
+  }
+
+  .btn.sm {
+    height: 36px;
+  }
+
+  .theme-toggle .label {
+    display: none;
+  }
+
+  .theme-toggle {
+    width: 40px;
+    padding: 0;
+  }
+
+  .topbar.mode-editor .logo .word {
+    display: none;
+  }
+
+  .avatar {
+    width: 36px;
+    height: 36px;
+  }
+
+  .recent .del {
+    width: 40px;
+    height: 40px;
+  }
+
+  .nav a {
+    padding: 10px 14px;
+  }
+}

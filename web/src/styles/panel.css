@@ -9,10 +9,6 @@
   border-left: 1px solid var(--line);
 }
 
-.side.collapsed {
-  display: none;
-}
-
 .sheet-h {
   display: none;
 }
@@ -407,6 +403,19 @@ dialog.modal .actions {
 }
 
 @media (max-width: 700px) {
+  .tab {
+    height: 48px;
+  }
+
+  .ask input {
+    height: 40px;
+  }
+
+  .res button,
+  .crit label {
+    min-height: 44px;
+  }
+
   .side {
     position: absolute;
     left: 0;
@@ -420,15 +429,15 @@ dialog.modal .actions {
     border-radius: 12px 12px 0 0;
     box-shadow: 0 -8px 24px var(--shadow);
     transform: translateY(102%);
-    transition: transform 0.2s ease;
-  }
-
-  .side.collapsed {
-    display: flex;
+    /* 닫혀 있을 때는 키보드·화면 낭독기도 닿지 않게 숨긴다(내려가는 동안은 보이도록 숨김을 늦춘다) */
+    visibility: hidden;
+    transition: transform 0.2s ease, visibility 0s linear 0.2s;
   }
 
   .side.open {
     transform: translateY(0);
+    visibility: visible;
+    transition: transform 0.2s ease, visibility 0s;
   }
 
   .sheet-h {

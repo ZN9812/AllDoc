@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { relativeTime } from '../lib/time';
 import { useSearch } from '../state/search';
 import DownloadMenu from './DownloadMenu';
@@ -22,6 +23,9 @@ interface EditorProps {
 export default function TopBar(props: HomeProps | EditorProps) {
   const query = useSearch((s) => s.query);
   const setQuery = useSearch((s) => s.setQuery);
+
+  // 홈·내 문서 화면을 떠날 때 검색어를 비워서, 다른 화면에서 되돌아왔을 때 목록이 걸러진 채로 남지 않게 한다.
+  useEffect(() => () => setQuery(''), [setQuery]);
 
   return (
     <header className={`topbar mode-${props.mode}`}>
