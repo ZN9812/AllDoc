@@ -1,11 +1,15 @@
 import { textGuard, type Op } from '@alldoc/shared';
 import { describe, expect, it } from 'vitest';
+import { analyzeConsistency } from '../../ai/consistency';
 import { DocxModel, type DocxHost } from './model';
-import { makeDocxBytes, SAMPLE_DOCX_PARAS, type ParaSpec } from './fixtures';
+import { makeDocxBytes, mapParas, SAMPLE_DOCX_PARAS, type ParaSpec, type TableSpec } from './fixtures';
 
 /** SuperDoc 의 문서 API 를 흉내 내는 메모리 문서. 내보내기는 시험용 DOCX 만들기로 한다. */
 class FakeDocx {
+  /** 문서 순서대로 늘어놓은 문단(표 칸 안 포함). items 안의 문단과 같은 객체다. */
   paras: ParaSpec[];
+  /** 문단과 표로 이루어진 문서 구조 */
+  items: Array<ParaSpec | TableSpec>;
   rev = 0;
   extractCount = 0;
   exportCount = 0;
@@ -16,8 +20,14 @@ class FakeDocx {
   /** 내보낸 DOCX 에 문단 번호(w14:paraId)를 쓰지 않는다 */
   exportParaIds = true;
 
-  constructor(paras: ParaSpec[]) {
-    this.paras = paras.map((p, i) => ({ ...p, rFonts: p.rFonts ? { ...p.rFonts } : undefined, paraId: String(i + 1).padStart(8, '0') }));
+  constructor(items: Array<ParaSpec | TableSpec>) {
+    const flat: ParaSpec[] = [];
+    this.items = mapParas(items, (p) => {
+      const copy = { ...p, rFonts: p.rFonts ? { ...p.rFonts } : undefined, paraId: String(flat.length + 1).padStart(8, '0') };
+      flat.push(copy);
+      return copy;
+    });
+    this.paras = flat;
   }
 
   private para(blockId: string): ParaSpec {
@@ -79,7 +89,7 @@ class FakeDocx {
     },
     exportDocx: async () => {
       this.exportCount++;
-      const items = this.paras.map((p) => (this.exportParaIds ? p : { ...p, paraId: undefined }));
+      const items = mapParas(this.items, (p) => (this.exportParaIds ? p : { ...p, paraId: undefined }));
       return new Blob([new Uint8Array(makeDocxBytes(items))]);
     },
   };
@@ -331,5 +341,72 @@ describe('DocxModel.apply: 문단 서식', () => {
     ]);
     expect(r.ok).toBe(true);
     expect(f.paras[4]).toMatchObject({ text: '본문 문장입니다. 며칠 뒤에 만나요. 할려고 했어요.', sizePt: 11, linePct: 150 });
+  });
+});
+
+describe('DocxModel: 표 안의 문단', () => {
+  const BODY_FONT = { font: '맑은 고딕', sizePt: 10, linePct: 160, align: 'both' } as const;
+  const body = (text: string): ParaSpec => ({ text, ...BODY_FONT });
+  const head = (text: string): ParaSpec => ({ ...body(text), sizePt: 14, bold: true });
+  /** 본문 6개 + 표(2x2, 왼쪽 칸만 14pt 굵게) + 안쪽 표가 든 표 + 맺음 문단 */
+  const FORM: Array<ParaSpec | TableSpec> = [
+    ...Array.from({ length: 6 }, (_, i) => body(`본문 ${i + 1}번째 문장입니다.`)),
+    [
+      [head('성명'), body('홍길동')],
+      [head('소속'), body('개발팀')],
+    ],
+    [[body('바깥 칸'), { children: [body('안쪽 표 앞글'), [[body('안쪽 몇일')]]] }]],
+    body('맺음 문단입니다.'),
+  ];
+  const where = (s: Awaited<ReturnType<DocxModel['summarize']>>, text: string) => s.paragraphs.find((p) => p.text === text);
+
+  it('요약에서 표 칸 안의 문단에는 표 위치가 붙고 본문의 문단에는 붙지 않는다', async () => {
+    const s = await model(new FakeDocx(FORM)).summarize();
+    expect(where(s, '본문 1번째 문장입니다.')).not.toHaveProperty('cell');
+    expect(where(s, '맺음 문단입니다.')).not.toHaveProperty('cell');
+    expect(where(s, '성명')?.cell).toEqual({ table: 1, row: 1, col: 1, depth: 1 });
+    expect(where(s, '개발팀')?.cell).toEqual({ table: 1, row: 2, col: 2, depth: 1 });
+    expect(where(s, '바깥 칸')?.cell).toEqual({ table: 2, row: 1, col: 1, depth: 1 });
+    expect(where(s, '안쪽 표 앞글')?.cell).toEqual({ table: 2, row: 1, col: 2, depth: 1 });
+    expect(where(s, '안쪽 몇일')?.cell).toEqual({ table: 3, row: 1, col: 1, depth: 2 });
+  });
+
+  it('문단 번호가 없는 문서에서도 글이 같은 문단끼리 짝지어 표 위치를 읽는다', async () => {
+    const f = new FakeDocx(FORM);
+    f.exportParaIds = false;
+    const s = await model(f).summarize();
+    expect(where(s, '개발팀')?.cell).toEqual({ table: 1, row: 2, col: 2, depth: 1 });
+    expect(where(s, '안쪽 몇일')?.cell?.depth).toBe(2);
+  });
+
+  it('표 칸의 서식이 본문과 달라도 서식 점검(문서 안 일관성)은 지적하지 않는다', async () => {
+    const s = await model(new FakeDocx(FORM)).summarize();
+    // 표 칸까지 묶어 비교했다면 "본문 글자 크기가 다른 곳"으로 지적했을 문서다.
+    expect(analyzeConsistency({ ...s, paragraphs: s.paragraphs.map(({ cell: _cell, ...p }) => p) }).findings.map((f) => f.label)).toEqual(['본문 글자 크기가 다른 곳 2곳']);
+    expect(analyzeConsistency(s).findings).toEqual([]);
+  });
+
+  it('표 칸 안의 글과 서식도 본문처럼 바꾸고 되돌릴 수 있다', async () => {
+    const f = new FakeDocx(FORM);
+    const m = model(f);
+    const s = await m.summarize();
+    const cell = where(s, '안쪽 몇일');
+    const head = where(s, '성명');
+    if (!cell || !head) throw new Error('표 안 문단을 찾지 못했어요');
+    const ops: Op[] = [
+      { type: 'replaceText', paragraph: cell.index, find: '몇일', replace: '며칠', guard: textGuard(cell.text) },
+      { type: 'setCharStyle', paragraph: head.index, style: { fontSizePt: 11 }, guard: textGuard(head.text) },
+      { type: 'setParaStyle', paragraph: head.index, style: { align: 'center' }, guard: textGuard(head.text) },
+    ];
+    const r = await m.apply(ops);
+    expect(r.ok).toBe(true);
+    expect(f.paras[cell.index]?.text).toBe('안쪽 며칠');
+    expect(f.paras[head.index]).toMatchObject({ sizePt: 11, align: 'center' });
+    if (!r.ok) return;
+    expect((await m.apply(r.inverse)).ok).toBe(true);
+    expect(f.paras[cell.index]?.text).toBe('안쪽 몇일');
+    expect(f.paras[head.index]).toMatchObject({ sizePt: 14, align: 'both' });
+    // 고치고 되돌려도 표 위치는 그대로다.
+    expect(where(await m.summarize(), '안쪽 몇일')?.cell).toEqual({ table: 3, row: 1, col: 1, depth: 2 });
   });
 });

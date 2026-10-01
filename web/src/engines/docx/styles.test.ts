@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { makeDocxBytes, type ParaSpec } from './fixtures';
+import type { CellPlace } from '@alldoc/shared';
+import { makeDocxBytes, type ParaSpec, type TableSpec } from './fixtures';
 import { browserParse, parseDocxParagraphs } from './styles';
 import { decodeUtf8, readZipFiles } from './zip';
 
-async function read(items: Array<ParaSpec | string[][]>) {
+async function read(items: Array<ParaSpec | TableSpec>) {
   const files = await readZipFiles(new Uint8Array(makeDocxBytes(items)), ['word/document.xml', 'word/styles.xml']);
   return parseDocxParagraphs(decodeUtf8(files.get('word/document.xml') as Uint8Array), decodeUtf8(files.get('word/styles.xml') as Uint8Array), browserParse);
 }
@@ -84,5 +85,105 @@ describe('스타일 상속', () => {
     const cyc = `<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:styleId="A"><w:basedOn w:val="B"/></w:style><w:style w:type="paragraph" w:styleId="B"><w:basedOn w:val="A"/></w:style></w:styles>`;
     const [p] = parseDocxParagraphs(xml('<w:p><w:pPr><w:pStyle w:val="A"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:eastAsiaTheme="minorEastAsia"/></w:rPr><w:t>x</w:t></w:r></w:p>'), cyc, browserParse);
     expect(p?.char.fontFamily).toBe('Arial');
+  });
+});
+
+describe('표 칸 위치 읽기', () => {
+  const place = (table: number, row: number, col: number, depth = 1): CellPlace => ({ table, row, col, depth });
+  const cellOf = (paras: Awaited<ReturnType<typeof read>>, text: string): CellPlace | undefined => paras.find((p) => p.text === text)?.cell;
+
+  it('표 칸 안의 문단에는 표 번호·행·열이 붙고, 본문의 문단에는 붙지 않는다', async () => {
+    const paras = await read([{ text: '앞' }, [['가', '나'], ['다', '라']], { text: '뒤' }]);
+    expect(cellOf(paras, '가')).toEqual(place(1, 1, 1));
+    expect(cellOf(paras, '나')).toEqual(place(1, 1, 2));
+    expect(cellOf(paras, '다')).toEqual(place(1, 2, 1));
+    expect(cellOf(paras, '라')).toEqual(place(1, 2, 2));
+    expect(paras.find((p) => p.text === '앞')).not.toHaveProperty('cell');
+    expect(paras.find((p) => p.text === '뒤')).not.toHaveProperty('cell');
+  });
+
+  it('표 번호는 문서 순서로 센다', async () => {
+    const paras = await read([[['첫째 표']], { text: '사이' }, [['둘째 표']]]);
+    expect(cellOf(paras, '첫째 표')?.table).toBe(1);
+    expect(cellOf(paras, '둘째 표')?.table).toBe(2);
+  });
+
+  it('한 칸에 문단이 여럿이면 모두 같은 칸의 위치를 갖는다', async () => {
+    const paras = await read([[[{ children: [{ text: '칸의 첫 문단' }, { text: '칸의 둘째 문단' }] }, '옆 칸']]]);
+    expect(cellOf(paras, '칸의 첫 문단')).toEqual(place(1, 1, 1));
+    expect(cellOf(paras, '칸의 둘째 문단')).toEqual(place(1, 1, 1));
+    expect(cellOf(paras, '옆 칸')).toEqual(place(1, 1, 2));
+  });
+
+  it('표 안의 표는 깊이 2이고, 바깥 표 다음 번호를 받는다. 그 뒤의 표는 그 다음 번호다', async () => {
+    const paras = await read([
+      [['바깥 1열', { children: [{ text: '바깥 2열 앞글' }, [['안쪽 1', '안쪽 2'], ['안쪽 3', '안쪽 4']]] }]],
+      [['다음 표']],
+    ]);
+    expect(cellOf(paras, '바깥 1열')).toEqual(place(1, 1, 1));
+    expect(cellOf(paras, '바깥 2열 앞글')).toEqual(place(1, 1, 2)); // 안쪽 표가 든 칸의 글은 바깥 표의 칸이다
+    expect(cellOf(paras, '안쪽 1')).toEqual(place(2, 1, 1, 2));
+    expect(cellOf(paras, '안쪽 2')).toEqual(place(2, 1, 2, 2));
+    expect(cellOf(paras, '안쪽 4')).toEqual(place(2, 2, 2, 2));
+    expect(cellOf(paras, '다음 표')).toEqual(place(3, 1, 1));
+  });
+
+  it('바깥 표의 행 수는 안쪽 표의 행을 세지 않는다', async () => {
+    const paras = await read([[['첫 줄'], [{ children: [[['안쪽 첫 줄'], ['안쪽 둘째 줄']]] }], ['셋째 줄']]]);
+    expect(cellOf(paras, '첫 줄')).toEqual(place(1, 1, 1));
+    expect(cellOf(paras, '셋째 줄')).toEqual(place(1, 3, 1));
+    expect(cellOf(paras, '안쪽 둘째 줄')).toEqual(place(2, 2, 1, 2));
+  });
+
+  it('가로로 합친 칸 뒤의 칸은 합친 만큼 건너뛴 열이다', async () => {
+    const paras = await read([[[{ children: [{ text: '합친 칸' }], colSpan: 2 }, '셋째 열'], ['가', '나', '다']]]);
+    expect(cellOf(paras, '합친 칸')).toEqual(place(1, 1, 1));
+    expect(cellOf(paras, '셋째 열')).toEqual(place(1, 1, 3));
+    expect(cellOf(paras, '다')).toEqual(place(1, 2, 3));
+  });
+
+  it('세로로 합친 칸이 있어도 아래 줄의 칸은 자기 열을 유지한다', async () => {
+    const paras = await read([
+      [
+        [{ children: [{ text: '세로 합침' }], vMerge: 'restart' }, '오른쪽 위'],
+        [{ children: [], vMerge: 'continue' }, '오른쪽 아래'],
+      ],
+    ]);
+    expect(cellOf(paras, '세로 합침')).toEqual(place(1, 1, 1));
+    expect(cellOf(paras, '오른쪽 위')).toEqual(place(1, 1, 2));
+    expect(cellOf(paras, '오른쪽 아래')).toEqual(place(1, 2, 2));
+  });
+
+  const doc = (body: string) =>
+    `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml"><w:body>${body}</w:body></w:document>`;
+  const parse = (body: string) => parseDocxParagraphs(doc(body), null, browserParse);
+  const tbl = (rows: string) => `<w:tbl><w:tblGrid><w:gridCol w:w="1000"/></w:tblGrid>${rows}</w:tbl>`;
+  const run = (t: string) => `<w:p><w:r><w:t>${t}</w:t></w:r></w:p>`;
+
+  it('행 앞에 비워 둔 열(gridBefore)이 있으면 그만큼 건너뛴 열이다', () => {
+    const paras = parse(tbl(`<w:tr><w:trPr><w:gridBefore w:val="2"/></w:trPr><w:tc>${run('셋째 열 칸')}</w:tc></w:tr>`));
+    expect(cellOf(paras, '셋째 열 칸')).toEqual(place(1, 1, 3));
+  });
+
+  it('내용 컨트롤(w:sdt)로 감싼 칸과 문단도 같은 표의 같은 칸으로 읽는다', () => {
+    const paras = parse(
+      tbl(`<w:tr><w:tc>${run('앞 칸')}</w:tc><w:sdt><w:sdtContent><w:tc><w:sdt><w:sdtContent>${run('감싼 칸')}</w:sdtContent></w:sdt></w:tc></w:sdtContent></w:sdt></w:tr>`),
+    );
+    expect(cellOf(paras, '앞 칸')).toEqual(place(1, 1, 1));
+    expect(cellOf(paras, '감싼 칸')).toEqual(place(1, 1, 2));
+  });
+
+  it('텍스트 상자 안의 문단은 표 칸에 놓여 있어도 칸의 글로 치지 않고, 상자 안의 표는 표 번호를 차지하지 않는다', () => {
+    const box = `<w:p><w:r><w:pict><v:shape><v:textbox><w:txbxContent>${run('상자 글')}${tbl(`<w:tr><w:tc>${run('상자 안의 표')}</w:tc></w:tr>`)}${run('끝')}</w:txbxContent></v:textbox></v:shape></w:pict></w:r></w:p>`;
+    const paras = parse(`${tbl(`<w:tr><w:tc>${box}</w:tc></w:tr>`)}${tbl(`<w:tr><w:tc>${run('진짜 둘째 표')}</w:tc></w:tr>`)}`);
+    expect(cellOf(paras, '상자 글')).toBeUndefined();
+    expect(cellOf(paras, '상자 안의 표')).toBeUndefined();
+    expect(cellOf(paras, '진짜 둘째 표')?.table).toBe(2); // 상자를 품은 표가 1번, 상자 안의 표는 세지 않는다
+  });
+
+  it('칸이나 행이 없는 엉터리 표 구조에서도 멈추지 않는다', () => {
+    const paras = parse(`<w:tc>${run('행 없는 칸')}</w:tc>${run('본문')}`);
+    expect(cellOf(paras, '행 없는 칸')).toBeUndefined();
+    expect(paras.map((p) => p.text)).toEqual(['행 없는 칸', '본문']);
   });
 });

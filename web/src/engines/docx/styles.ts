@@ -1,7 +1,7 @@
 // DOCX 안의 글꼴·크기·굵기·정렬·줄 간격을 읽는다.
 // SuperDoc 의 문서 API 는 글(text)과 문단 번호는 주지만 글꼴·크기 같은 글자 서식은 주지 않아서, 내보낸 DOCX 의 XML 을 직접 읽는다.
 // 스타일 상속(기본값 → 스타일 → 직접 지정)을 따라 "실제로 적용되는 값"을 구한다.
-import type { CharStyle, ParaStyle } from '@alldoc/shared';
+import type { CellPlace, CharStyle, ParaStyle } from '@alldoc/shared';
 
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const W14 = 'http://schemas.microsoft.com/office/word/2010/wordml';
@@ -14,6 +14,8 @@ export interface ParsedParagraph {
   para: ParaStyle;
   /** 실제로 적용되는 글꼴 칸별 이름(되돌리기용). 이름을 알 수 없는 칸은 없다. */
   fonts: FontSlots;
+  /** 표 칸 안의 문단이면 그 칸의 위치. 본문의 문단이면 없다. */
+  cell?: CellPlace;
 }
 
 export interface FontSlots {
@@ -234,11 +236,94 @@ export function resolveParagraph(p: Element, sheet: StyleSheet): ParsedParagraph
   return { paraId: p.getAttributeNS(W14, 'paraId') ?? p.getAttribute('w14:paraId'), text: paragraphText(p), char, para, fonts };
 }
 
-/** 문서 XML 의 모든 문단(표 안 포함)의 글과 서식을 문서 순서대로 읽는다. */
+const isW = (e: Element, name: string): boolean => e.localName === name && e.namespaceURI === W;
+
+/** 가장 가까운 조상 중 이름이 name 인 것(Word 이름공간) */
+function ancestor(e: Element, name: string): Element | null {
+  for (let cur = e.parentElement; cur; cur = cur.parentElement) if (isW(cur, name)) return cur;
+  return null;
+}
+
+/** 칸이 가로로 차지하는 열 수(칸 합치기) */
+const spanOf = (tc: Element): number => {
+  const n = Number(attr(kid(kid(tc, 'tcPr'), 'gridSpan'), 'val'));
+  return Number.isInteger(n) && n >= 1 ? n : 1;
+};
+/** 행 앞에 비워 둔 열 수 */
+const skippedBefore = (tr: Element): number => {
+  const n = Number(attr(kid(kid(tr, 'trPr'), 'gridBefore'), 'val'));
+  return Number.isInteger(n) && n >= 1 ? n : 0;
+};
+
+/**
+ * 문단이 어느 표의 어느 칸에 있는지 알려 주는 함수를 만든다.
+ *  - 표 번호는 문서 순서로 센다(표 안의 표는 바깥 표 다음 번호). 한글(HWP) 문서와 같은 방식이다.
+ *  - 행은 그 표 자신의 행(안쪽 표의 행은 세지 않는다), 열은 칸 합치기를 따라 센 시작 열이다.
+ *  - 텍스트 상자 안의 문단은 표 칸에 놓여 있어도 칸의 글로 치지 않는다(그 칸에 붙어 떠 있는 상자의 글이다).
+ */
+function cellLocator(doc: Document): (p: Element) => CellPlace | undefined {
+  const tableNumber = new Map<Element, number>();
+  for (const t of Array.from(doc.getElementsByTagNameNS(W, 'tbl'))) if (!ancestor(t, 'txbxContent')) tableNumber.set(t, tableNumber.size + 1);
+
+  const ownRows = new Map<Element, Element[]>();
+  const rowsOf = (tbl: Element): Element[] => {
+    let rows = ownRows.get(tbl);
+    if (!rows) {
+      rows = Array.from(tbl.getElementsByTagNameNS(W, 'tr')).filter((tr) => ancestor(tr, 'tbl') === tbl);
+      ownRows.set(tbl, rows);
+    }
+    return rows;
+  };
+  const ownCells = new Map<Element, Element[]>();
+  const cellsOf = (tr: Element): Element[] => {
+    let cells = ownCells.get(tr);
+    if (!cells) {
+      cells = Array.from(tr.getElementsByTagNameNS(W, 'tc')).filter((tc) => ancestor(tc, 'tr') === tr);
+      ownCells.set(tr, cells);
+    }
+    return cells;
+  };
+
+  const places = new Map<Element, CellPlace | null>();
+  const placeOf = (tc: Element): CellPlace | null => {
+    const known = places.get(tc);
+    if (known !== undefined) return known;
+    let place: CellPlace | null = null;
+    const tr = ancestor(tc, 'tr');
+    const tbl = tr ? ancestor(tr, 'tbl') : null;
+    const table = tbl ? tableNumber.get(tbl) : undefined;
+    if (tr && tbl && table !== undefined) {
+      const cells = cellsOf(tr);
+      let col = skippedBefore(tr) + 1;
+      for (const c of cells) {
+        if (c === tc) break;
+        col += spanOf(c);
+      }
+      let depth = 0;
+      for (let t: Element | null = tbl; t; t = ancestor(t, 'tbl')) depth++;
+      place = { table, row: rowsOf(tbl).indexOf(tr) + 1, col, depth };
+    }
+    places.set(tc, place);
+    return place;
+  };
+
+  return (p) => {
+    if (ancestor(p, 'txbxContent')) return undefined;
+    const tc = ancestor(p, 'tc');
+    return (tc && placeOf(tc)) || undefined;
+  };
+}
+
+/** 문서 XML 의 모든 문단(표 안 포함)의 글과 서식을 문서 순서대로 읽는다. 표 칸 안의 문단에는 칸의 위치(cell)가 붙는다. */
 export function parseDocxParagraphs(documentXml: string, stylesXml: string | null, parse: (xml: string) => Document): ParsedParagraph[] {
   const sheet = parseStyleSheet(stylesXml, parse);
   const doc = parse(documentXml);
-  return Array.from(doc.getElementsByTagNameNS(W, 'p')).map((p) => resolveParagraph(p, sheet));
+  const locate = cellLocator(doc);
+  return Array.from(doc.getElementsByTagNameNS(W, 'p')).map((p) => {
+    const parsed = resolveParagraph(p, sheet);
+    const cell = locate(p);
+    return cell ? { ...parsed, cell } : parsed;
+  });
 }
 
 export const browserParse = (xml: string): Document => new DOMParser().parseFromString(xml, 'application/xml');

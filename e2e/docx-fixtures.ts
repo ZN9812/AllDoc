@@ -1,11 +1,11 @@
 // e2e 용 DOCX 시험 파일. 만드는 법은 web/src/engines/docx/fixtures.ts 에 있다.
-import { DOCX_MIME, makeDocxBytes, SAMPLE_DOCX_PARAS, type ParaSpec } from '../web/src/engines/docx/fixtures';
+import { DOCX_MIME, makeDocxBytes, SAMPLE_DOCX_PARAS, type ParaSpec, type TableSpec } from '../web/src/engines/docx/fixtures';
 import { decodeUtf8, readZipFiles } from '../web/src/engines/docx/zip';
 import type { Upload } from './helpers';
 
-export { SAMPLE_DOCX_PARAS, type ParaSpec };
+export { SAMPLE_DOCX_PARAS, type ParaSpec, type TableSpec };
 
-export function makeDocx(name = 'sample.docx', items: Array<ParaSpec | string[][]> = SAMPLE_DOCX_PARAS): Upload {
+export function makeDocx(name = 'sample.docx', items: Array<ParaSpec | TableSpec> = SAMPLE_DOCX_PARAS): Upload {
   return { name, mimeType: DOCX_MIME, buffer: makeDocxBytes(items) };
 }
 

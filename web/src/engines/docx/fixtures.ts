@@ -39,19 +39,56 @@ function paraXml(p: ParaSpec, commentId?: number): string {
   return `<w:p${p.paraId ? ` w14:paraId="${p.paraId}"` : ''}>${ppr ? `<w:pPr>${ppr}</w:pPr>` : ''}${body}</w:p>`;
 }
 
-/** 표 한 개(행×열). 칸마다 문단 하나. */
-export function tableXml(rows: string[][]): string {
-  const cols = rows[0]?.length ?? 1;
-  const grid = Array.from({ length: cols }, () => '<w:gridCol w:w="3000"/>').join('');
-  const trs = rows
-    .map(
-      (r) =>
-        `<w:tr>${r
-          .map((c) => `<w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/></w:tcPr>${paraXml({ text: c })}</w:tc>`)
-          .join('')}</w:tr>`,
-    )
-    .join('');
+/** 여러 문단·안쪽 표·칸 합치기를 가진 표 칸 */
+export interface CellBox {
+  children: Array<ParaSpec | TableSpec>;
+  /** 가로로 합친 칸 수(기본 1) */
+  colSpan?: number;
+  /** 세로로 합치기: 'restart' 는 합친 칸의 첫 칸, 'continue' 는 그 아래로 이어지는 칸(글이 없다) */
+  vMerge?: 'restart' | 'continue';
+}
+/** 표 칸. 문자열은 글만 있는 문단 하나, ParaSpec 은 서식을 준 문단 하나 */
+export type CellSpec = string | ParaSpec | CellBox;
+/** 표 한 개: 행마다 칸의 목록 */
+export type TableSpec = CellSpec[][];
+
+const isBox = (c: CellSpec): c is CellBox => typeof c === 'object' && 'children' in c;
+const spanOf = (c: CellSpec): number => (isBox(c) ? (c.colSpan ?? 1) : 1);
+
+const CELL_WIDTH = 3000;
+
+function cellXml(c: CellSpec): string {
+  const box: CellBox = isBox(c) ? c : { children: [typeof c === 'string' ? { text: c } : c] };
+  const span = box.colSpan ?? 1;
+  const props = `<w:tcPr><w:tcW w:w="${CELL_WIDTH * span}" w:type="dxa"/>${span > 1 ? `<w:gridSpan w:val="${span}"/>` : ''}${
+    box.vMerge ? `<w:vMerge${box.vMerge === 'restart' ? ' w:val="restart"' : ''}/>` : ''
+  }</w:tcPr>`;
+  const last = box.children[box.children.length - 1];
+  const content = box.vMerge === 'continue' || box.children.length === 0 ? '<w:p/>' : box.children.map((ch) => (Array.isArray(ch) ? tableXml(ch) : paraXml(ch))).join('');
+  // 칸은 문단으로 끝나야 한다(표로 끝나면 Word 가 파일이 깨졌다고 한다).
+  return `<w:tc>${props}${content}${Array.isArray(last) && box.vMerge !== 'continue' ? '<w:p/>' : ''}</w:tc>`;
+}
+
+/** 표 한 개(행×열). 칸마다 문단 하나가 기본이고, 칸 합치기·안쪽 표는 CellBox 로 만든다. */
+export function tableXml(rows: TableSpec): string {
+  const cols = Math.max(1, ...rows.map((r) => r.reduce((n, c) => n + spanOf(c), 0)));
+  const grid = Array.from({ length: cols }, () => `<w:gridCol w:w="${CELL_WIDTH}"/>`).join('');
+  const trs = rows.map((r) => `<w:tr>${r.map(cellXml).join('')}</w:tr>`).join('');
   return `<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4"/><w:left w:val="single" w:sz="4"/><w:bottom w:val="single" w:sz="4"/><w:right w:val="single" w:sz="4"/><w:insideH w:val="single" w:sz="4"/><w:insideV w:val="single" w:sz="4"/></w:tblBorders></w:tblPr><w:tblGrid>${grid}</w:tblGrid>${trs}</w:tbl>`;
+}
+
+/**
+ * 문단·표 목록의 모든 문단(표 칸 안 포함)을 fn 으로 바꾼 새 목록을 만든다. fn 은 문서 순서대로 불린다.
+ * 칸의 문자열은 글만 있는 문단으로 보고 fn 에 넘긴다.
+ */
+export function mapParas(items: Array<ParaSpec | TableSpec>, fn: (p: ParaSpec) => ParaSpec): Array<ParaSpec | TableSpec> {
+  const table = (t: TableSpec): TableSpec => t.map((row) => row.map(cell));
+  const cell = (c: CellSpec): CellSpec => {
+    if (typeof c === 'string') return fn({ text: c });
+    if (isBox(c)) return { ...c, children: c.children.map((ch) => (Array.isArray(ch) ? table(ch) : fn(ch))) };
+    return fn(c);
+  };
+  return items.map((it) => (Array.isArray(it) ? table(it) : fn(it)));
 }
 
 const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"';
@@ -115,8 +152,8 @@ function zip(files: Record<string, string>): Buffer {
 
 export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-/** 문단(과 표)으로 DOCX 를 만든다. items 의 문자열 배열은 표(행), 객체는 문단. */
-export function makeDocxBytes(items: Array<ParaSpec | string[][]>): Buffer {
+/** 문단(과 표)으로 DOCX 를 만든다. items 의 배열은 표(행의 목록), 객체는 문단. */
+export function makeDocxBytes(items: Array<ParaSpec | TableSpec>): Buffer {
   const comments: Array<{ text: string; author?: string }> = [];
   const body = items
     .map((it) => {

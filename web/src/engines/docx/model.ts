@@ -128,7 +128,7 @@ export class DocxModel {
     snap.blocks.forEach((b, index) => {
       if (!isTextBlock(b) || b.text.trim() === '') return;
       const st = snap.styles.get(b.nodeId);
-      paragraphs.push({ index, text: b.text, char: st?.char ?? {}, para: st?.para ?? {} });
+      paragraphs.push({ index, text: b.text, char: st?.char ?? {}, para: st?.para ?? {}, ...(st?.cell ? { cell: st.cell } : {}) });
     });
     return { kind: 'docx', paragraphs };
   }
