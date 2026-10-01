@@ -74,6 +74,8 @@ export const ProposalSchema = z.object({
   /** 변경 내역 카드에 보여줄 짧은 앞/뒤 표시 (예: "15pt" → "13pt") */
   before: z.string(),
   after: z.string(),
+  /** 표 안의 글을 고치는 제안이면 그 위치 문구(예: "표 2 · 3행 1열"). 화면 쪽이 문서 요약을 보고 붙이며, 서버는 만들지 않는다. */
+  place: z.string().optional(),
   ops: z.array(OpSchema).min(1),
 });
 export type Proposal = z.infer<typeof ProposalSchema>;
