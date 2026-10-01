@@ -1,12 +1,13 @@
 // DOCX 문서의 읽기와 변경. SuperDoc 의 문서 API(extract·replace·format·paragraphs)로 고치고,
 // 글꼴·크기 같은 서식은 내보낸 DOCX 의 XML 에서 읽는다(styles.ts).
 //
-// 문단 번호: extract() 가 돌려주는 본문 블록 목록에서의 순서(0부터, 표 안의 문단 포함) 뒤에,
-// 머리말 → 꼬리말 → 각주 → 미주 문단이 이어진다(areas.ts). 본문 밖의 문단은 그 글의 "이야기(story)" 를 문서 API 에 함께 넘겨 고친다.
+// 문단 번호: extract() 가 돌려주는 본문 블록 목록에서의 순서(0부터, 표 안의 문단과 글상자 안의 문단 포함) 뒤에,
+// 머리말 → 꼬리말 → 각주 → 미주 문단이 이어진다(areas.ts). 본문 밖의 문단(글상자 포함)은 그 글의 "이야기(story)" 를 문서 API 에 함께 넘겨 고친다.
+// 글상자 안의 문단은 extract() 의 목록에 이미 있으므로 번호는 그대로 두고, 그 블록에 글상자 자리(area)를 붙인다.
 import { textGuard, type AreaPlace, type CharStyle, type DocSummary, type Op, type ParagraphInfo, type ParaStyle } from '@alldoc/shared';
 import { applyAtomic, stale, unsupported, type OneResult } from '../applyOps';
 import type { ApplyFailure, ApplyResult } from '../types';
-import { readAreas, toPlace, type AreaApi, type AreaRef } from './areas';
+import { readAreas, readTextBoxes, toPlace, type AreaApi, type AreaRef, type TextBoxRead } from './areas';
 import { browserParse, parseDocxParagraphs, parseNoteOrder, usesEvenAndOddHeaders, type FontSlots, type NoteOrder, type ParsedParagraph } from './styles';
 import { decodeUtf8, readZipFiles } from './zip';
 
@@ -14,7 +15,7 @@ export interface BlockLike {
   nodeId: string;
   type: string;
   text: string;
-  /** 머리말·꼬리말·각주·미주 안의 문단이면 그 자리. 본문(표 안 포함)의 문단이면 없다. */
+  /** 머리말·꼬리말·각주·미주·글상자 안의 문단이면 그 자리. 본문(표 안 포함)의 문단이면 없다. */
   area?: AreaRef;
 }
 
@@ -49,6 +50,20 @@ const selection = (block: BlockLike, start: number, end: number) => ({
 
 /** 글 속의 각주·미주 표시나 그림 같은 개체 자리. 이 자리를 바꾸는 글 바꾸기는 개체(와 각주 내용)를 지워 버리므로 하지 않는다. */
 const OBJECT_CHAR = '\uFFFC';
+
+/** 본문 블록에 글상자 자리를 붙인다(글상자 안의 문단이 아닌 블록은 그대로). */
+const withBoxes = (blocks: BlockLike[], boxes: ReadonlyMap<string, AreaRef>): BlockLike[] =>
+  boxes.size === 0
+    ? blocks
+    : blocks.map((b) => {
+        const area = boxes.get(b.nodeId);
+        return area ? { ...b, area } : b;
+      });
+
+const stripCell = (p: ParsedParagraph): ParsedParagraph => {
+  const { cell: _cell, ...rest } = p; // 머리말·글상자 안의 표 칸 위치는 쓰지 않는다(위치는 머리말·글상자로 말한다).
+  return rest;
+};
 
 /** 서식을 찾는 열쇠. 본문 밖의 문단은 번호가 파일마다 따로 매겨질 수 있어 어느 파일의 문단인지를 앞에 붙인다. */
 const styleKey = (b: BlockLike): string => (b.area ? `${b.area.part}#${b.nodeId}` : b.nodeId);
@@ -85,8 +100,10 @@ interface Snapshot {
   revision: string;
   /** 본문 블록 뒤에 머리말·꼬리말·각주·미주 문단이 이어진다 */
   blocks: BlockLike[];
-  /** 그중 본문 밖의 문단들 */
+  /** 그중 본문 밖의 문단들(머리말·꼬리말·각주·미주. 글상자 안의 문단은 본문 블록에 자리만 붙는다) */
   areas: BlockLike[];
+  /** 글상자 안의 문단(문단 번호 → 글상자 자리) */
+  boxes: Map<string, AreaRef>;
   styles: Map<string, ParsedParagraph>;
   /** 홀수·짝수 쪽 머리말을 따로 쓰는 문서인가 */
   evenOdd: boolean;
@@ -123,6 +140,8 @@ const representative = (f: FontSlots): string | undefined => f.eastAsia ?? f.asc
 
 export class DocxModel {
   private cache: Omit<Snapshot, 'blocks'> | null = null;
+  /** 마지막으로 찾은 글상자 자리(문단 번호들이 같은 동안 다시 쓴다) */
+  private boxCache: { key: string; boxes: Map<string, AreaRef> } | null = null;
   /** 마지막으로 읽은 문서가 홀수·짝수 쪽 머리말을 따로 쓰는가(읽기 전에는 모른다) */
   private evenOdd = false;
   /** 마지막으로 읽은 문서의 각주·미주 순서 */
@@ -132,30 +151,39 @@ export class DocxModel {
 
   /**
    * 내보낸 DOCX 의 XML 에서 문단마다 글자·문단 서식을 읽는다. 본문은 문단 번호(w14:paraId)나 글로 짝짓고,
-   * 머리말·꼬리말·각주·미주는 그 글이 든 파일에서 문단 번호로 짝짓는다.
+   * 글상자는 본문 파일에서 문단 번호로, 머리말·꼬리말·각주·미주는 그 글이 든 파일에서 문단 번호로 짝짓는다.
    */
   private async readStyles(blocks: BlockLike[]): Promise<{ styles: Map<string, ParsedParagraph>; evenOdd: boolean; noteOrder: NoteOrder }> {
     const blob = await this.host.exportDocx();
-    const parts = [...new Set(blocks.flatMap((b) => (b.area ? [b.area.part] : [])))];
+    const parts = [...new Set(blocks.flatMap((b) => (b.area && b.area.kind !== 'textbox' ? [b.area.part] : [])))];
     const files = await readZipFiles(new Uint8Array(await blob.arrayBuffer()), ['word/document.xml', 'word/styles.xml', 'word/settings.xml', ...parts]);
     const docXml = files.get('word/document.xml');
     if (!docXml) throw new Error('내보낸 DOCX 에서 본문을 찾을 수 없어요.');
     const stylesXml = files.get('word/styles.xml');
     const sheet = stylesXml ? decodeUtf8(stylesXml) : null;
+    const docParas = parseDocxParagraphs(decodeUtf8(docXml), sheet, browserParse);
+    // 글상자 안의 문단은 문단 번호로만 짝짓는다. 본문 문단을 글로 짝지을 때 같은 글의 글상자 문단과 헷갈리지 않게 그 목록에서 뺀다.
+    const boxIds = new Set(blocks.flatMap((b) => (b.area?.kind === 'textbox' ? [b.nodeId] : [])));
     const styles = matchStyles(
       blocks.filter((b) => !b.area),
-      parseDocxParagraphs(decodeUtf8(docXml), sheet, browserParse),
+      boxIds.size === 0 ? docParas : docParas.filter((p) => !(p.paraId && boxIds.has(p.paraId))),
     );
+    if (boxIds.size > 0) {
+      const byId = new Map<string, ParsedParagraph>();
+      for (const p of docParas) if (p.paraId) byId.set(p.paraId, p);
+      for (const b of blocks) {
+        const hit = b.area?.kind === 'textbox' ? byId.get(b.nodeId) : undefined;
+        if (hit) styles.set(styleKey(b), stripCell(hit));
+      }
+    }
     for (const part of parts) {
       const xml = files.get(part);
       if (!xml) continue;
       const byId = new Map<string, ParsedParagraph>();
       for (const p of parseDocxParagraphs(decodeUtf8(xml), sheet, browserParse)) if (p.paraId) byId.set(p.paraId, p);
       for (const b of blocks) {
-        const hit = b.area?.part === part ? byId.get(b.nodeId) : undefined;
-        if (!hit) continue;
-        const { cell: _cell, ...rest } = hit; // 머리말 안의 표 칸 위치는 쓰지 않는다(위치는 머리말·꼬리말로 말한다).
-        styles.set(styleKey(b), rest);
+        const hit = b.area?.part === part && b.area.kind !== 'textbox' ? byId.get(b.nodeId) : undefined;
+        if (hit) styles.set(styleKey(b), stripCell(hit));
       }
     }
     const settings = files.get('word/settings.xml');
@@ -166,24 +194,40 @@ export class DocxModel {
     return { styles, evenOdd, noteOrder };
   }
 
+  /**
+   * 본문 블록 가운데 글상자 안의 문단과 그 자리. 글상자 번호를 하나씩 읽어 보느라 글상자가 많은 문서에서는 한 번에 수 초가 걸리므로,
+   * 본문 문단 번호들(순서 포함)이 지난번과 같으면(= 글상자가 생기거나 없어지거나 옮겨지지 않았으면. 글 바꾸기·서식 변경은 번호를 바꾸지 않는다)
+   * 지난번 결과를 다시 쓴다. 읽다가 오류가 난 결과(errors > 0)는 간직하지 않으며, 호출한 쪽도 그 결과를 오래 두지 않아야 한다.
+   */
+  private async textBoxes(blocks: readonly BlockLike[]): Promise<TextBoxRead> {
+    const key = blocks.map((b) => b.nodeId).join('\n');
+    if (this.boxCache?.key === key) return { boxes: this.boxCache.boxes, errors: 0 };
+    const read = await readTextBoxes(this.host.doc, new Set(blocks.map((b) => b.nodeId)));
+    this.boxCache = read.errors === 0 ? { key, boxes: read.boxes } : null;
+    return read;
+  }
+
   /** 지금 문서의 블록 목록과 서식. 문서 변경 번호(revision)가 같으면 이전에 읽은 서식과 본문 밖의 문단을 다시 쓴다. */
   private async snapshot(fresh = false): Promise<Snapshot> {
     const ex = await this.host.doc.extract({});
     const c = this.cache;
-    if (!fresh && c && c.revision === ex.revision) return { ...c, blocks: [...ex.blocks, ...c.areas] };
+    if (!fresh && c && c.revision === ex.revision) return { ...c, blocks: [...withBoxes(ex.blocks, c.boxes), ...c.areas] };
+    const { boxes, errors } = await this.textBoxes(ex.blocks);
     const areas = (await readAreas(this.host.doc)).blocks;
-    const blocks = [...ex.blocks, ...areas];
+    const blocks = [...withBoxes(ex.blocks, boxes), ...areas];
     const { styles, evenOdd, noteOrder } = await this.readStyles(blocks);
-    this.cache = { revision: ex.revision, areas, styles, evenOdd, noteOrder };
-    return { revision: ex.revision, blocks, areas, styles, evenOdd, noteOrder };
+    // 글상자를 읽다가 오류가 났으면 이 결과를 다음 요약이 다시 쓰지 않게 간직하지 않는다(일시적인 오류일 수 있다).
+    this.cache = errors === 0 ? { revision: ex.revision, areas, boxes, styles, evenOdd, noteOrder } : null;
+    return { revision: ex.revision, blocks, areas, boxes, styles, evenOdd, noteOrder };
   }
 
   /** 문단 번호로 문단을 찾는 데 쓰는 블록 목록(summarize 와 같은 번호). 화면이 "고칠 곳"을 문서 위에 그릴 때 쓴다. */
   async blocks(): Promise<BlockLike[]> {
     const ex = await this.host.doc.extract({});
     const c = this.cache;
-    if (c && c.revision === ex.revision) return [...ex.blocks, ...c.areas];
-    return [...ex.blocks, ...(await readAreas(this.host.doc)).blocks];
+    if (c && c.revision === ex.revision) return [...withBoxes(ex.blocks, c.boxes), ...c.areas];
+    const { boxes } = await this.textBoxes(ex.blocks);
+    return [...withBoxes(ex.blocks, boxes), ...(await readAreas(this.host.doc)).blocks];
   }
 
   /** 본문 밖 문단의 위치(카드에 보이는 것과 같다) */
@@ -197,8 +241,9 @@ export class DocxModel {
     snap.blocks.forEach((b, index) => {
       if (!isTextBlock(b) || b.text.trim() === '') return;
       const st = snap.styles.get(styleKey(b));
-      // 글상자 안의 문단은 목록에는 오지만 본문 문단으로는 고칠 수 없다("Block not found"). AI 가 고치려 들지 않게 요약에서 뺀다(번호는 그대로).
-      if (st?.inTextBox) return;
+      // 글상자 안의 문단 중 편집기가 글상자로 받아들이지 않은 것(머리말·꼬리말 안의 글상자 등)은 목록에는 오지만
+      // 본문 문단으로는 고칠 수 없다("Block not found"). AI 가 고치려 들지 않게 요약에서 뺀다(번호는 그대로).
+      if (st?.inTextBox && !b.area) return;
       const place = b.area ? { area: toPlace(b.area, snap.evenOdd, snap.noteOrder) } : st?.cell ? { cell: st.cell } : {};
       paragraphs.push({ index, text: b.text, char: st?.char ?? {}, para: st?.para ?? {}, ...place });
     });
@@ -222,10 +267,14 @@ export class DocxModel {
     }
   }
 
-  /** 변경 묶음을 적용할 작업 상태를 연다. 본문 밖의 문단은 그곳을 고치는 변경이 있을 때만 읽는다(본문만 고칠 때는 그만큼 빠르다). */
+  /**
+   * 변경 묶음을 적용할 작업 상태를 연다. 머리말·꼬리말·각주·미주는 그곳을 고치는 변경이 있을 때만 읽는다(본문만 고칠 때는 그만큼 빠르다).
+   * 글상자 안의 문단은 본문 목록에 있어 어느 문단이 글상자 것인지 알아야 하므로 늘 찾아본다(글상자가 없는 문서는 빈 번호 몇 개만 본다).
+   */
   private async open(ops: Op[]): Promise<Session> {
     const ex = await this.host.doc.extract({});
-    const blocks = ex.blocks.map((b) => ({ ...b }));
+    const { boxes } = await this.textBoxes(ex.blocks);
+    const blocks = withBoxes(ex.blocks, boxes).map((b) => ({ ...b }));
     const bodyCount = blocks.length;
     const withAreas = ops.some((o) => o.paragraph >= bodyCount);
     if (withAreas) blocks.push(...(await readAreas(this.host.doc)).blocks);
@@ -400,10 +449,13 @@ export class DocxModel {
       }
     }
 
-    const blocks = [...ex.blocks, ...areas];
+    // 글은 위에서 작업 상태와 같다고 확인했으므로, 글상자 자리가 붙은 작업 상태의 본문 블록을 그대로 쓴다.
+    const body = s.blocks.slice(0, s.bodyCount);
+    const blocks = [...body, ...areas];
     const { styles, evenOdd, noteOrder } = await this.readStyles(blocks);
     // 본문 밖의 문단까지 읽었을 때만 다음 요약에 쓸 수 있게 간직한다(아니면 요약이 다시 읽는다).
-    this.cache = s.withAreas ? { revision: ex.revision, areas, styles, evenOdd, noteOrder } : null;
+    const boxes = new Map(body.flatMap((b) => (b.area ? [[b.nodeId, b.area] as const] : [])));
+    this.cache = s.withAreas ? { revision: ex.revision, areas, boxes, styles, evenOdd, noteOrder } : null;
     for (const [paragraph, want] of wantChar) {
       const now = styles.get(styleKey(blocks[paragraph] as BlockLike));
       if (!now) return 'Word 편집기에서 바뀐 서식을 확인하지 못해 변경을 취소했어요.';

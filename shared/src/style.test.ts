@@ -26,6 +26,8 @@ describe('본문 밖 영역(머리말·꼬리말·각주·미주) 위치', () =>
     expect(areaLabel({ kind: 'footer', pages: 'odd' })).toBe('꼬리말(홀수 쪽)');
     expect(areaLabel({ kind: 'header', pages: 'even', section: 2 })).toBe('머리말(짝수 쪽) · 구역 2');
     expect(areaLabel({ kind: 'footer', pages: 'first' })).toBe('꼬리말(첫 쪽)');
+    expect(areaLabel({ kind: 'textbox', number: 2 })).toBe('글상자 2');
+    expect(areaName({ kind: 'textbox', number: 2 })).toBe('글상자');
     expect(areaLabel({ kind: 'footnote', number: 3 })).toBe('각주 3');
     expect(areaLabel({ kind: 'endnote', number: 1, section: 2 })).toBe('미주 1 · 구역 2');
     expect(areaName({ kind: 'footnote', number: 3 })).toBe('각주');

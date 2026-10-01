@@ -21,9 +21,14 @@ export interface ParaSpec {
   noteRef?: { kind: 'footnote' | 'endnote'; id: number };
   /** 글 끝에 이어 붙이는 쪽 번호 필드(PAGE). 편집기는 필드의 결과("1")도 글로 보여 준다. */
   pageField?: boolean;
-  /** 이 문단에 떠 있는 글상자를 달고, 그 안에 이 문단(글 하나)을 넣는다. 편집기는 글상자 안의 문단을 이 문단 바로 다음 블록으로 보여 준다. */
-  textBox?: ParaSpec;
+  /** 이 문단에 떠 있는 글상자를 달고, 그 안에 이 문단(들)을 넣는다. 편집기는 글상자 안의 문단을 이 문단 바로 다음 블록으로 보여 준다. */
+  textBox?: ParaSpec | ParaSpec[];
+  /** textBox 를 옛 방식(VML)으로만 적는다(그림 방식 쪽이 없고, 두 벌로 저장하는 mc:AlternateContent 도 쓰지 않는다). */
+  textBoxLegacy?: boolean;
 }
+
+/** 이 문단에 단 글상자 안의 문단들(없으면 빈 목록) */
+export const textBoxParas = (p: ParaSpec): ParaSpec[] => (p.textBox === undefined ? [] : Array.isArray(p.textBox) ? p.textBox : [p.textBox]);
 
 /** 편집기(SuperDoc)가 이 문단의 글로 보여 주는 것: 글 + 쪽 번호 필드의 결과 + 각주 표시 자리(U+FFFC) */
 export const shownText = (p: ParaSpec): string => `${p.text}${p.pageField ? '1' : ''}${p.noteRef ? '\uFFFC' : ''}`;
@@ -35,9 +40,20 @@ const STYLE_NOTE = { footnote: ['FootnoteText', 'FootnoteReference'], endnote: [
 const noteRefXml = (n: NonNullable<ParaSpec['noteRef']>): string =>
   `<w:r><w:rPr><w:rStyle w:val="${STYLE_NOTE[n.kind][1]}"/></w:rPr><w:${n.kind}Reference w:id="${n.id}"/></w:r>`;
 
-/** 떠 있는 글상자(DrawingML) 하나. 안에 문단 하나가 든다. */
-const textBoxXml = (inner: ParaSpec): string =>
-  `<w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251659264" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="column"><wp:posOffset>3000000</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV><wp:extent cx="2000000" cy="800000"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapSquare wrapText="bothSides"/><wp:docPr id="1" name="글상자"/><wp:cNvGraphicFramePr/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="2000000" cy="800000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></wps:spPr><wps:txbx><w:txbxContent>${paraXml(inner)}</w:txbxContent></wps:txbx><wps:bodyPr/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>`;
+/** 글상자마다 다른 번호(wp:docPr 의 id)를 주려는 세는 수. makeDocxBytes 가 만들기 시작할 때 0 으로 되돌린다. */
+let boxSeq = 0;
+
+/**
+ * 떠 있는 글상자 하나(안에 문단 여럿). Word·LibreOffice 처럼 그림 방식(DrawingML)과 옛 방식(VML)을 두 벌로 적는다(mc:AlternateContent).
+ * 편집기는 그림 방식 쪽을 읽는다. 옛 방식 쪽 문단에는 문단 번호(w14:paraId)를 적지 않는다.
+ */
+const textBoxXml = (inner: ParaSpec[], legacyOnly = false): string => {
+  const id = ++boxSeq;
+  const choice = `<w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251659264" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="column"><wp:posOffset>3000000</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV><wp:extent cx="2000000" cy="800000"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapSquare wrapText="bothSides"/><wp:docPr id="${id}" name="글상자 ${id}"/><wp:cNvGraphicFramePr/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="2000000" cy="800000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></wps:spPr><wps:txbx><w:txbxContent>${inner.map((q) => paraXml(q)).join('')}</w:txbxContent></wps:txbx><wps:bodyPr/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing>`;
+  const fallback = `<w:pict><v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe"><v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype><v:shape id="TextBox${id}" o:spid="_x0000_s${1025 + id}" type="#_x0000_t202" style="position:absolute;margin-left:236pt;margin-top:0;width:157pt;height:63pt;z-index:251659264"><v:textbox><w:txbxContent>${inner.map((q) => paraXml({ ...q, paraId: undefined, textBox: undefined })).join('')}</w:txbxContent></v:textbox><w10:wrap type="square"/></v:shape></w:pict>`;
+  if (legacyOnly) return `<w:r>${fallback}</w:r>`;
+  return `<w:r><mc:AlternateContent><mc:Choice Requires="wps">${choice}</mc:Choice><mc:Fallback>${fallback}</mc:Fallback></mc:AlternateContent></w:r>`;
+};
 
 const PAGE_FIELD_XML =
   '<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>';
@@ -59,7 +75,7 @@ function paraXml(p: ParaSpec, commentId?: number, mark?: 'footnote' | 'endnote')
     p.bold ? '<w:b/>' : '',
     p.sizePt ? `<w:sz w:val="${Math.round(p.sizePt * 2)}"/><w:szCs w:val="${Math.round(p.sizePt * 2)}"/>` : '',
   ].join('');
-  const mine = `${mark ? `<w:r><w:rPr><w:rStyle w:val="${STYLE_NOTE[mark][1]}"/></w:rPr><w:${mark}Ref/></w:r>` : ''}<w:r>${rpr ? `<w:rPr>${rpr}</w:rPr>` : ''}<w:t xml:space="preserve">${esc(p.text)}</w:t></w:r>${p.pageField ? PAGE_FIELD_XML : ''}${p.noteRef ? noteRefXml(p.noteRef) : ''}${p.textBox ? textBoxXml(p.textBox) : ''}`;
+  const mine = `${mark ? `<w:r><w:rPr><w:rStyle w:val="${STYLE_NOTE[mark][1]}"/></w:rPr><w:${mark}Ref/></w:r>` : ''}<w:r>${rpr ? `<w:rPr>${rpr}</w:rPr>` : ''}<w:t xml:space="preserve">${esc(p.text)}</w:t></w:r>${p.pageField ? PAGE_FIELD_XML : ''}${p.noteRef ? noteRefXml(p.noteRef) : ''}${p.textBox ? textBoxXml(textBoxParas(p), p.textBoxLegacy) : ''}`;
   const body =
     commentId === undefined
       ? mine
@@ -120,7 +136,7 @@ export function mapParas(items: Array<ParaSpec | TableSpec>, fn: (p: ParaSpec) =
 }
 
 const NS =
-  'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"';
+  'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w10="urn:schemas-microsoft-com:office:word"';
 
 /** 본문 밖의 글(머리말·꼬리말·각주·미주). 문단 목록에는 표도 넣을 수 있다(머리말 안의 표). */
 export type AreaItems = Array<ParaSpec | TableSpec>;
@@ -287,6 +303,7 @@ export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordproc
 
 /** 문단(과 표)으로 DOCX 를 만든다. items 의 배열은 표(행의 목록), 객체는 문단. areas 로 머리말·꼬리말·각주·미주를 달 수 있다. */
 export function makeDocxBytes(items: Array<ParaSpec | TableSpec>, areas?: DocxAreas): Buffer {
+  boxSeq = 0;
   const comments: Array<{ text: string; author?: string }> = [];
   const body = items
     .map((it) => {

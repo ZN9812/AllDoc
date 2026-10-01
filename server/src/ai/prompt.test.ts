@@ -61,9 +61,10 @@ describe('프롬프트 만들기', () => {
       expect(p).toContain('(표 안의 표)');
       expect(p).toContain('(각주 3)');
       expect(p).toContain('한글(hwp·hwpx) 문서에서 `(각주 …)`·`(미주 …)`가 적힌 문단은 글자 서식(setCharStyle)을 바꿀 수 없으니 replaceText 와 setParaStyle 만');
-      expect(p).toContain('`￼`(U+FFFC)는 각주·미주 표시나 그림 같은 개체가 놓인 자리');
+      expect(p).toContain('`\uFFFC`(U+FFFC)는 각주·미주 표시나 그림 같은 개체가 놓인 자리');
+      expect(p).toContain('`(글상자 2)`');
     }
-    expect(buildSystemPrompt('chat')).toContain('글 교정은 표 칸·머리말·꼬리말·각주·미주 안의 글에도 똑같이 적용');
+    expect(buildSystemPrompt('chat')).toContain('글 교정은 표 칸·머리말·꼬리말·각주·미주·글상자 안의 글에도 똑같이 적용');
     expect(buildSystemPrompt('format_check')).toContain('규칙이 그곳을 명시하지 않았다면 건드리지 마세요');
   });
 

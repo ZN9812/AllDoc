@@ -1,7 +1,7 @@
 import { textGuard, type Op } from '@alldoc/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { analyzeConsistency } from '../../ai/consistency';
-import { MAX_AREA_PARAGRAPHS, readAreas, toPlace, type AreaApi } from './areas';
+import { MAX_AREA_PARAGRAPHS, readAreas, readTextBoxes, toPlace, type AreaApi } from './areas';
 import { shownText, type DocxAreas, type ParaSpec } from './fixtures';
 import { DocxModel } from './model';
 import { FakeDocx } from './testing';
@@ -161,8 +161,8 @@ describe('DocxModel.summarize: 머리말·꼬리말·각주·미주', () => {
     const s = await model(make()).summarize();
     expect(s.paragraphs.map((p) => [p.index, p.text, p.area ?? null])).toEqual([
       [0, '본문 제목', null],
-      [1, '본문 첫 문단입니다.￼', null],
-      [2, '둘째 문단에 미주가 있습니다.￼', null],
+      [1, '본문 첫 문단입니다.\uFFFC', null],
+      [2, '둘째 문단에 미주가 있습니다.\uFFFC', null],
       [3, '머리말 첫째 줄: 몇일 뒤', { kind: 'header', pages: 'both' }],
       [4, '머리말 둘째 줄', { kind: 'header', pages: 'both' }],
       [5, '첫 쪽 머리말입니다', { kind: 'header', pages: 'first' }],
@@ -391,27 +391,169 @@ describe('DocxModel.apply: 머리말·꼬리말·각주·미주 안의 글', () 
   });
 });
 
-describe('DocxModel: 글상자 안의 문단', () => {
-  it('요약에는 나오지 않지만(본문 문단으로 고칠 수 없다) 문단 번호 순서는 그대로 유지한다', async () => {
-    const f = new FakeDocx([{ text: '앞 문단', ...FONT, sizePt: 10 }, { text: '상자를 단 문단', ...FONT, sizePt: 10, textBox: { text: '상자 안 몇일', ...FONT, sizePt: 10 } }, { text: '뒤 문단', ...FONT, sizePt: 10 }], { footer: [{ text: '꼬리말' }] });
-    const m = model(f);
-    const s = await m.summarize();
-    expect(s.paragraphs.map((p) => [p.index, p.text])).toEqual([
-      [0, '앞 문단'],
-      [1, '상자를 단 문단'],
-      [3, '뒤 문단'],
-      [4, '꼬리말'],
+describe('DocxModel: 글상자 안의 글', () => {
+  /** 0 앞 문단 · 1 상자를 단 문단 · 2·3 글상자 1 의 두 문단 · 4 표 칸 · 5 표 칸에 놓인 글상자 2 · 6 옆 칸 · 7 뒤 문단 · 8 꼬리말 */
+  const makeBoxes = (): FakeDocx =>
+    new FakeDocx(
+      [
+        { text: '앞 문단', ...FONT, sizePt: 10 },
+        { text: '상자를 단 문단', ...FONT, sizePt: 10, textBox: [{ text: '상자 안 몇일', ...FONT, sizePt: 12, bold: true }, { text: '상자 둘째 줄 할려고', ...FONT, sizePt: 12 }] },
+        [[{ text: '표 칸 문단', ...FONT, sizePt: 10, textBox: { text: '표 칸 상자 되요', ...FONT, sizePt: 11 } }, '옆 칸']],
+        { text: '뒤 문단', ...FONT, sizePt: 10 },
+      ],
+      { footer: [{ text: '꼬리말' }] },
+    );
+
+  it('요약에서 글상자 안의 문단은 본문 흐름 안의 제 번호로 나오고, 글상자 위치(글상자마다 번호)가 붙는다', async () => {
+    const s = await model(makeBoxes()).summarize();
+    expect(s.paragraphs.map((p) => [p.index, p.text, p.area ?? null, p.cell ? '칸' : ''])).toEqual([
+      [0, '앞 문단', null, ''],
+      [1, '상자를 단 문단', null, ''],
+      [2, '상자 안 몇일', { kind: 'textbox', number: 1 }, ''],
+      [3, '상자 둘째 줄 할려고', { kind: 'textbox', number: 1 }, ''],
+      [4, '표 칸 문단', null, '칸'],
+      [5, '표 칸 상자 되요', { kind: 'textbox', number: 2 }, ''],
+      [6, '옆 칸', null, '칸'],
+      [7, '뒤 문단', null, ''],
+      [8, '꼬리말', { kind: 'footer', pages: 'both' }, ''],
     ]);
-    // 번호 3 의 문단과 본문 밖의 문단(4)이 그 번호로 고쳐진다.
-    const r = await m.apply([fix(f, 3, '뒤', '다음'), fix(f, 4, '꼬리', '아래')]);
+  });
+
+  it('글상자 안 문단의 글꼴·크기·굵기는 본문 파일에서 문단 번호로 짝지어 읽는다', async () => {
+    const s = await model(makeBoxes()).summarize();
+    const at = (i: number) => s.paragraphs.find((p) => p.index === i);
+    expect(at(2)).toMatchObject({ char: { fontSizePt: 12, bold: true } });
+    expect(at(3)?.char.bold).toBeUndefined();
+    expect(at(5)?.char.fontSizePt).toBe(11);
+  });
+
+  it('편집기의 글상자 번호가 건너뛰든(tb0 tb2 …) 이어지든(tb0 tb1 …) 같은 번호로 센다', async () => {
+    const a = makeBoxes();
+    a.textBoxIdStep = 1;
+    const places = async (f: FakeDocx) => (await model(f).summarize()).paragraphs.flatMap((p) => (p.area?.kind === 'textbox' ? [[p.index, p.area.number]] : []));
+    expect(await places(a)).toEqual([[2, 1], [3, 1], [5, 2]]);
+    expect(await places(makeBoxes())).toEqual([[2, 1], [3, 1], [5, 2]]);
+  });
+
+  it('편집기가 받아들이지 않는 글상자의 문단은 요약에서 빼고, 문단 번호 순서는 그대로다', async () => {
+    const f = makeBoxes();
+    f.rejectTextBoxes = true;
+    const s = await model(f).summarize();
+    expect(s.paragraphs.map((p) => p.index)).toEqual([0, 1, 4, 6, 7, 8]);
+  });
+
+  it('글상자 안의 글과 서식을 본문처럼 바꾸고 되돌릴 수 있다(본문 문단과 한 묶음으로도)', async () => {
+    const f = makeBoxes();
+    const m = model(f);
+    const r = await m.apply([
+      fix(f, 0, '앞', '첫'),
+      fix(f, 2, '몇일', '며칠'),
+      fix(f, 3, '할려고', '하려고'),
+      fix(f, 5, '되요', '돼요'),
+      { type: 'setCharStyle', paragraph: 2, style: { fontSizePt: 13 }, guard: guardAt(f, 2) },
+      { type: 'setParaStyle', paragraph: 3, style: { align: 'center' }, guard: guardAt(f, 3) },
+    ]);
     expect(r.ok).toBe(true);
-    expect(f.paras.map((p) => p.text)).toEqual(['앞 문단', '상자를 단 문단', '상자 안 몇일', '다음 문단']);
-    expect(areaTexts(f)).toEqual(['아래말']);
+    expect(f.paras.map((p) => p.text)).toEqual(['첫 문단', '상자를 단 문단', '상자 안 며칠', '상자 둘째 줄 하려고', '표 칸 문단', '표 칸 상자 돼요', '옆 칸', '뒤 문단']);
+    expect(f.paras[2]?.sizePt).toBe(13);
+    expect(f.paras[3]?.align).toBe('center');
+    if (!r.ok) return;
+    expect((await m.apply(r.inverse)).ok).toBe(true);
+    expect(f.paras.map((p) => p.text)).toEqual(['앞 문단', '상자를 단 문단', '상자 안 몇일', '상자 둘째 줄 할려고', '표 칸 문단', '표 칸 상자 되요', '옆 칸', '뒤 문단']);
+    expect(f.paras[2]).toMatchObject({ sizePt: 12 });
+    expect(f.paras[3]?.align).toBe('left');
+  });
+
+  it('글상자 안에서 바꾼 글을 편집기가 예상과 다르게 바꾸면 알리고 되돌린다', async () => {
+    const f = makeBoxes();
+    f.mangleReplace = true;
+    const r = await model(f).apply([fix(f, 2, '몇일', '며칠')]);
+    expect(r).toMatchObject({ ok: false, reason: 'failed' });
+    expect((r as { message: string }).message).toContain('글을 예상과 다르게');
+    expect(f.paras[2]?.text).not.toContain('며칠');
+  });
+
+  it('글상자가 없는 문서는 글상자 번호를 빈 번호 3개만 찾아보고 끝낸다', async () => {
+    const f = new FakeDocx(BODY);
+    await model(f).summarize();
+    expect(f.textBoxProbeCount).toBe(3);
+  });
+
+  it('요약·화면(blocks)의 문단 번호가 같고, blocks() 도 글상자 문단에 위치를 붙인다', async () => {
+    const m = model(makeBoxes());
+    const blocks = await m.blocks();
+    expect(blocks.map((b) => [b.text, b.area?.kind ?? ''])).toEqual([
+      ['앞 문단', ''],
+      ['상자를 단 문단', ''],
+      ['상자 안 몇일', 'textbox'],
+      ['상자 둘째 줄 할려고', 'textbox'],
+      ['표 칸 문단', ''],
+      ['표 칸 상자 되요', 'textbox'],
+      ['옆 칸', ''],
+      ['뒤 문단', ''],
+      ['꼬리말', 'footer'],
+    ]);
+    expect(blocks[2]?.area?.story).toEqual({ kind: 'story', storyType: 'textbox', textboxId: 'tb0' });
+    expect(blocks[5]?.area?.story).toEqual({ kind: 'story', storyType: 'textbox', textboxId: 'tb2' });
+  });
+
+  it('서식 점검(문서 안 일관성)은 글상자를 본문과 비교하지 않는다(글상자는 서식이 본문과 다른 게 보통이다)', async () => {
+    const f = new FakeDocx([
+      { text: '본문 첫째 문장입니다.', ...FONT, sizePt: 10, textBox: { text: '큰 글씨 글상자', ...FONT, sizePt: 24 } },
+      { text: '본문 둘째 문장입니다.', ...FONT, sizePt: 10 },
+      { text: '본문 셋째 문장입니다.', ...FONT, sizePt: 10 },
+    ]);
+    const s = await model(f).summarize();
+    expect(s.paragraphs.some((p) => p.area?.kind === 'textbox' && p.char.fontSizePt === 24)).toBe(true);
+    expect(analyzeConsistency(s).findings).toEqual([]);
+  });
+
+  it('글상자 찾기는 본문 문단 번호들이 같은 동안 한 번만 한다(요약·적용·되돌리기를 거듭해도 다시 찾지 않고, 문단이 늘면 다시 찾는다)', async () => {
+    const f = makeBoxes();
+    const m = model(f);
+    await m.summarize();
+    const first = f.textBoxProbeCount;
+    expect(first).toBeGreaterThan(0);
+    const r = await m.apply([fix(f, 2, '몇일', '며칠')]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    await m.summarize();
+    await m.blocks();
+    expect((await m.apply(r.inverse)).ok).toBe(true);
+    expect(f.textBoxProbeCount).toBe(first); // 그동안 다시 찾지 않았다
+    // 본문 문단이 늘어났다면(글상자가 생기거나 옮겨졌을 수도 있다) 다시 찾는다.
+    f.paras.push({ text: '새 문단', paraId: 'zz000001', ...FONT });
+    expect((await m.apply([fix(f, 2, '몇일', '며칠')])).ok).toBe(true);
+    expect(f.textBoxProbeCount).toBeGreaterThan(first);
+  });
+
+  it('글상자를 읽다가 오류가 났으면 그 결과를 간직하지 않아서, 다음에는 다시 찾아 글상자를 읽는다', async () => {
+    const f = makeBoxes();
+    const m = model(f);
+    f.failTextBoxProbes = true;
+    expect((await m.summarize()).paragraphs.some((p) => p.area?.kind === 'textbox')).toBe(false);
+    f.failTextBoxProbes = false;
+    const boxes = (await m.summarize()).paragraphs.flatMap((p) => (p.area?.kind === 'textbox' ? [p.index] : []));
+    expect(boxes).toEqual([2, 3, 5]);
+  });
+
+  it('글상자 목록 읽기가 오류를 내면 그 글상자는 없는 것으로 치고, 본문에 없는 문단의 글상자(옛 방식 쪽 복사본)는 무시한다', async () => {
+    const f = makeBoxes();
+    const ids = new Set((await f.host.doc.extract({})).blocks.map((b) => b.nodeId));
+    expect((await readTextBoxes(f.host.doc, ids)).boxes.size).toBe(3);
+    // 본문 목록에 없는 문단 번호들만 든 글상자는 센 글상자 번호에 넣지 않는다.
+    expect((await readTextBoxes(f.host.doc, new Set(['없는번호']))).boxes.size).toBe(0);
+    const broken: AreaApi = { blocks: { list: async () => Promise.reject(new Error('편집기 오류')) } };
+    const failed = await readTextBoxes(broken, ids);
+    expect(failed.boxes.size).toBe(0);
+    expect(failed.errors).toBeGreaterThan(0); // 오류는 알려 준다(없는 번호는 오류가 아니라 빈 목록이다)
+    expect((await readTextBoxes(f.host.doc, ids)).errors).toBe(0);
+    expect((await readTextBoxes({}, ids)).boxes.size).toBe(0);
   });
 });
 
 describe('DocxModel.apply: 각주·미주 표시(U+FFFC) 보호', () => {
-  const OBJ = '￼';
+  const OBJ = '\uFFFC';
 
   it('각주 표시가 든 자리를 바꾸는 변경은 거절하고 문서를 건드리지 않는다(바꾸면 각주가 지워진다)', async () => {
     const f = make();

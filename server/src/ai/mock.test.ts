@@ -109,4 +109,20 @@ describe('데모 AI와 머리말·꼬리말·각주 안의 글', () => {
     const note = await mock.propose({ request: req({ mode: 'format_check', criteria: 'rules', rulesText: '각주는 줄 간격 160%', document }) });
     for (const p of note.proposals) expect(p.ops.map((o) => o.paragraph)).toEqual([1, 2]);
   });
+
+  it('글상자 안의 글도 맞춤법은 적용하고, 서식 규칙은 "글상자"가 적혀 있을 때만 포함한다', async () => {
+    const withBox = {
+      kind: 'docx' as const,
+      paragraphs: [
+        { index: 0, text: '본문 몇일 뒤', char: { fontFamily: '굴림', fontSizePt: 12 }, para: {} },
+        { index: 1, text: '글상자 몇일', char: { fontFamily: '굴림', fontSizePt: 20 }, para: {}, area: { kind: 'textbox' as const, number: 1 } },
+      ],
+    };
+    const typo = (await mock.propose({ request: req({ document: withBox }) })).proposals.find((p) => p.title === '"몇일" 고치기');
+    expect(typo?.ops.map((o) => o.paragraph)).toEqual([0, 1]);
+    const plain = await mock.propose({ request: req({ mode: 'format_check', criteria: 'rules', rulesText: '본문은 10pt', document: withBox }) });
+    for (const p of plain.proposals) expect(p.ops.map((o) => o.paragraph)).toEqual([0]);
+    const named = await mock.propose({ request: req({ mode: 'format_check', criteria: 'rules', rulesText: '글상자도 10pt', document: withBox }) });
+    for (const p of named.proposals) expect(p.ops.map((o) => o.paragraph)).toEqual([0, 1]);
+  });
 });

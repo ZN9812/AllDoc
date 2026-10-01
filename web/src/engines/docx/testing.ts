@@ -1,11 +1,13 @@
 // 시험 전용: SuperDoc 의 문서 API 를 흉내 내는 메모리 문서. 화면 코드에서는 쓰지 않는다.
-// 실제 편집기에서 확인한 동작을 따른다: 본문은 extract(), 머리말·꼬리말·각주·미주는 "이야기(story)" 를 지정해 blocks.list·find·getNode 로 읽고
+// 실제 편집기에서 확인한 동작을 따른다: 본문은 extract(), 머리말·꼬리말·각주·미주·글상자는 "이야기(story)" 를 지정해 blocks.list·find·getNode 로 읽고
 // replace·format·paragraphs 에 같은 이야기를 적어 고친다. 이야기를 잘못 적으면(본문 문단에 이야기를 적거나, 머리말 문단에 빠뜨리면) 오류를 낸다.
+// 글상자 안의 문단은 extract() 의 목록에도 나오지만(글상자를 단 문단 바로 다음) 본문 문단 주소로는 찾을 수 없고, 글상자 번호(tb0 …)로만 찾는다.
+// 글상자는 Word·LibreOffice 처럼 그림 방식과 옛 방식 두 벌로 저장되어, 편집기가 받아들이는 글상자 번호는 한 칸씩 건너뛴다(tb0 tb2 tb4 …).
 import type { Story } from './areas';
-import { makeDocxBytes, mapParas, placeHeadersFooters, shownText, type AreaItems, type DocxAreas, type ParaSpec, type TableSpec } from './fixtures';
+import { makeDocxBytes, mapParas, placeHeadersFooters, shownText, textBoxParas, type AreaItems, type DocxAreas, type ParaSpec, type TableSpec } from './fixtures';
 import type { DocxHost } from './model';
 
-const storyKey = (s: Story): string => (s.storyType === 'headerFooterPart' ? `part:${s.refId}` : `${s.storyType}:${s.noteId}`);
+const storyKey = (s: Story): string => (s.storyType === 'headerFooterPart' ? `part:${s.refId}` : s.storyType === 'textbox' ? `textbox:${s.textboxId}` : `${s.storyType}:${s.noteId}`);
 
 interface FakeStory {
   story: Story;
@@ -19,8 +21,7 @@ interface FakeStory {
 const flatten = (items: AreaItems): ParaSpec[] => {
   const out: ParaSpec[] = [];
   mapParas(items, (p) => {
-    out.push(p);
-    if (p.textBox) out.push(p.textBox);
+    out.push(p, ...textBoxParas(p));
     return p;
   });
   return out;
@@ -48,17 +49,30 @@ export class FakeDocx {
   areaApiBroken = false;
   /** 목록 API 가 한 번에 주는 개수(작게 하면 이어 읽기를 시험할 수 있다) */
   pageSize = 1000;
+  /** 글상자 번호가 건너뛰는 간격. 2 는 Word·LibreOffice 문서(tb0 tb2 …), 1 은 옛 방식 복사본이 없는 문서(tb0 tb1 …) */
+  textBoxIdStep = 2;
+  /** 편집기가 글상자를 하나도 받아들이지 않는다(편집기가 열지 못하는 종류의 글상자). 글상자 번호로 찾으면 모두 빈 목록이다. */
+  rejectTextBoxes = false;
+  /** 글상자 번호로 문단 목록을 읽어 본 횟수 */
+  textBoxProbeCount = 0;
+  /** 글상자 번호로 문단 목록을 읽으면 오류가 난다(일시적인 편집기 오류를 흉내 낸다) */
+  failTextBoxProbes = false;
 
   private stories: FakeStory[] = [];
-  /** 글상자 안의 문단 번호들. 본문 문단으로는 찾을 수 없다(실제 편집기가 "Block not found" 를 낸다). */
-  private textBoxIds = new Set<string>();
+  /** 글상자 안의 문단들(글상자마다 한 묶음, 문서 순서). 본문 문단으로는 찾을 수 없다(실제 편집기가 "Block not found" 를 낸다). */
+  private boxes: ParaSpec[][] = [];
 
   constructor(items: Array<ParaSpec | TableSpec>, areas: DocxAreas = {}) {
     let n = 0;
-    const copy = (p: ParaSpec): ParaSpec => ({ ...p, rFonts: p.rFonts ? { ...p.rFonts } : undefined, paraId: String(++n).padStart(8, '0'), ...(p.textBox ? { textBox: copy(p.textBox) } : {}) });
+    const copy = (p: ParaSpec): ParaSpec => ({
+      ...p,
+      rFonts: p.rFonts ? { ...p.rFonts } : undefined,
+      paraId: String(++n).padStart(8, '0'),
+      ...(p.textBox ? { textBox: Array.isArray(p.textBox) ? p.textBox.map(copy) : copy(p.textBox) } : {}),
+    });
     this.items = mapParas(items, copy);
     this.paras = flatten(this.items);
-    for (const p of this.paras) if (p.textBox) this.textBoxIds.add(p.textBox.paraId as string);
+    for (const p of this.paras) if (p.textBox) this.boxes.push(textBoxParas(p));
 
     const owned: DocxAreas = { ...(areas.evenAndOdd ? { evenAndOdd: true } : {}) };
     for (const key of ['header', 'firstHeader', 'evenHeader', 'footer', 'firstFooter', 'evenFooter'] as const) {
@@ -80,13 +94,31 @@ export class FakeDocx {
     return this.stories.flatMap((s) => s.flat);
   }
 
+  /** 글상자 번호(tb0 …)가 가리키는 글상자의 문단들. 받아들이지 않는 번호나 없는 번호면 undefined */
+  private box(textboxId: string): ParaSpec[] | undefined {
+    const m = /^tb(\d+)$/.exec(textboxId);
+    if (!m || this.rejectTextBoxes) return undefined;
+    const n = Number(m[1]);
+    return n % this.textBoxIdStep === 0 ? this.boxes[n / this.textBoxIdStep] : undefined;
+  }
+
   private find(story: Story | undefined): FakeStory | undefined {
+    if (story?.storyType === 'textbox') {
+      const paras = this.box(story.textboxId);
+      return paras ? { story, items: paras, flat: paras } : undefined;
+    }
     return story ? this.stories.find((s) => storyKey(s.story) === storyKey(story)) : undefined;
   }
 
   /** 문단 찾기. 실제 편집기처럼 본문 문단에 이야기를 적거나 본문 밖 문단에 이야기를 빠뜨리거나 틀리게 적으면 오류를 낸다. */
   private para(blockId: string, story?: Story): ParaSpec {
-    if (this.textBoxIds.has(blockId)) throw new Error(`Block "${blockId}" not found.`);
+    const k = this.boxes.findIndex((paras) => paras.some((x) => x.paraId === blockId));
+    if (k >= 0) {
+      // 글상자 안의 문단: 본문 문단 주소로는 "Block not found". 글상자 번호로만 찾는다.
+      const mine = story?.storyType === 'textbox' ? this.box(story.textboxId) : undefined;
+      if (!mine || mine !== this.boxes[k]) throw new Error(`Block "${blockId}" not found.`);
+      return mine.find((x) => x.paraId === blockId) as ParaSpec;
+    }
     const inBody = this.paras.find((x) => x.paraId === blockId);
     if (inBody) {
       if (story) throw new Error(`블록 ${blockId} 은 본문에 있는데 이야기가 ${storyKey(story)} 로 적혔어요`);
@@ -162,6 +194,10 @@ export class FakeDocx {
       blocks: {
         list: async (input) => {
           this.checkAreaApi();
+          if (input.in.storyType === 'textbox') {
+            this.textBoxProbeCount++;
+            if (this.failTextBoxProbes) throw new Error('편집기 오류');
+          }
           const s = this.find(input.in);
           const entries = (s?.items ?? []).map((it, i) =>
             Array.isArray(it)
@@ -219,7 +255,8 @@ export class FakeDocx {
     },
     exportDocx: async () => {
       this.exportCount++;
-      const strip = (p: ParaSpec): ParaSpec => (this.exportParaIds ? p : { ...p, paraId: undefined, ...(p.textBox ? { textBox: strip(p.textBox) } : {}) });
+      const strip = (p: ParaSpec): ParaSpec =>
+        this.exportParaIds ? p : { ...p, paraId: undefined, ...(p.textBox ? { textBox: Array.isArray(p.textBox) ? p.textBox.map(strip) : strip(p.textBox) } : {}) };
       const areas: DocxAreas = { ...(this.areas.evenAndOdd ? { evenAndOdd: true } : {}) };
       for (const key of ['header', 'firstHeader', 'evenHeader', 'footer', 'firstFooter', 'evenFooter'] as const) {
         if (this.areas[key]) areas[key] = mapParas(this.areas[key], strip);

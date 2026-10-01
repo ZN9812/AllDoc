@@ -27,7 +27,16 @@ const attr = (xml: string, name: string): string | undefined => new RegExp(`${na
 /** 내려받은 DOCX 에서 문단별 글과 서식을 읽는다(시험 확인용. 문서 안의 표 칸 문단도 순서대로 포함). part 는 읽을 파일(기본은 본문). */
 export async function readDocx(bytes: Buffer, part = 'word/document.xml'): Promise<DocxPara[]> {
   const files = await readZipFiles(new Uint8Array(bytes), [part]);
-  const xml = decodeUtf8(files.get(part) ?? new Uint8Array());
+  return parseParas(decodeUtf8(files.get(part) ?? new Uint8Array()));
+}
+
+/** 글상자(mc:AlternateContent)는 문단 안에 문단이 들어 있어 아래의 단순한 읽기로는 바깥 문단이 뒤섞이므로, 글상자를 뺀 본문 문단만 읽는다. */
+export async function readDocxBody(bytes: Buffer, part = 'word/document.xml'): Promise<DocxPara[]> {
+  const files = await readZipFiles(new Uint8Array(bytes), [part]);
+  return parseParas(decodeUtf8(files.get(part) ?? new Uint8Array()).replace(/<mc:AlternateContent[^>]*>[\s\S]*?<\/mc:AlternateContent>/g, ''));
+}
+
+function parseParas(xml: string): DocxPara[] {
   const out: DocxPara[] = [];
   for (const m of xml.matchAll(/<w:p(?: [^>]*)?>[\s\S]*?<\/w:p>/g)) {
     const p = m[0];
@@ -128,4 +137,83 @@ export async function readDocxAreas(bytes: Buffer): Promise<DocxAreasRead> {
     footerXml: (await readDocxPart(bytes, 'word/footer1.xml')) ?? '',
     bodyXml: (await readDocxPart(bytes, 'word/document.xml')) ?? '',
   };
+}
+
+/**
+ * 시험용 Word 글상자 문서. 글상자 1(문단 둘)은 본문 문단에, 글상자 2 는 표 칸 안의 문단에 놓인다.
+ * 오탈자가 글상자 1 의 첫 문단("몇일")·둘째 문단("할려고"), 글상자 2("되요"), 본문("오랫만")에 하나씩 있어서 데모 AI 가 4가지를 제안한다.
+ * 글상자는 Word·LibreOffice 처럼 그림 방식과 옛 방식(VML) 두 벌로 저장된다.
+ */
+export const DOCX_BOX_SAMPLE = {
+  box1: ['신청 기간은 몇일 입니다', '담당자가 할려고 합니다'],
+  box2: ['비고: 되요 라고 적습니다'],
+  body: '오랫만에 쉬겠습니다.',
+  /** 오탈자를 모두 고친 뒤의 모습 */
+  fixed: { box1: ['신청 기간은 며칠 입니다', '담당자가 하려고 합니다'], box2: ['비고: 돼요 라고 적습니다'], body: '오랜만에 쉬겠습니다.' },
+};
+
+/**
+ * boxSize 가 있으면 글상자 안의 글을 그 크기(pt)의 굵은 글씨로 해서 본문과 서식이 다른 글상자를 흉내 낸다.
+ * extraBody 가 있으면 본문 끝에 그만큼 보통 문단을 더한다(서식 점검이 본문 문단 수를 보고 판단하기 때문).
+ */
+export function makeDocxWithBoxes(name = 'boxes.docx', opts: { boxSize?: number; extraBody?: number } = {}): Upload {
+  const font = { font: '맑은 고딕', sizePt: 10 } as const;
+  const boxPara = (text: string): ParaSpec => ({ text, ...font, ...(opts.boxSize ? { sizePt: opts.boxSize, bold: true } : {}) });
+  const items: Array<ParaSpec | TableSpec> = [
+    { text: '휴가 신청서', ...font, textBox: DOCX_BOX_SAMPLE.box1.map(boxPara) },
+    [[{ text: '구분', ...font, textBox: boxPara(DOCX_BOX_SAMPLE.box2[0] as string) }, '내용']],
+    { text: DOCX_BOX_SAMPLE.body, ...font },
+    ...Array.from({ length: opts.extraBody ?? 0 }, (_, i): ParaSpec => ({ text: `본문 ${i + 1}번째 문장입니다.`, ...font })),
+  ];
+  return makeDocx(name, items);
+}
+
+/** 옛 방식(VML)으로만 저장된 글상자(그림 방식 쪽이 없다)가 든 시험 문서. 글상자 안("되요")과 본문("오랫만")에 오탈자가 하나씩 있다. */
+export function makeDocxWithLegacyBox(name = 'legacy.docx'): Upload {
+  const font = { font: '맑은 고딕', sizePt: 10 } as const;
+  return makeDocx(name, [
+    { text: '휴가 신청서', ...font, textBox: { text: DOCX_BOX_SAMPLE.box2[0] as string, ...font }, textBoxLegacy: true },
+    { text: DOCX_BOX_SAMPLE.body, ...font },
+  ]);
+}
+
+/** 머리말 안에 글상자가 든 시험 문서. 머리말("몇일")과 머리말의 글상자("되요")와 본문("오랫만")에 오탈자가 하나씩 있다. */
+export function makeDocxWithHeaderBox(name = 'hdrbox.docx'): Upload {
+  const font = { font: '맑은 고딕', sizePt: 10 } as const;
+  return makeDocx(name, [{ text: '휴가 신청서', ...font }, { text: DOCX_BOX_SAMPLE.body, ...font }], {
+    header: [{ text: '머리말 몇일 입니다', ...font, textBox: { text: '머리말 상자 되요', ...font } }],
+  });
+}
+
+export interface DocxBoxesRead {
+  /** 글상자마다 문단의 글(그림 방식, 편집기가 읽는 쪽) */
+  choice: string[][];
+  /** 글상자마다 문단의 글(옛 방식 쪽 복사본). 편집기가 그림 방식 쪽을 고치면 이쪽도 같이 고쳐 저장한다. */
+  fallback: string[][];
+  /** 그림 방식 글상자의 문단마다 글자 크기(pt) */
+  sizes: number[][];
+}
+
+/** XML 조각 안의 문단마다 글(w:t 를 이어 붙인 것). 편집기가 글을 바꾸면 한 문단의 글이 여러 w:t 로 나뉘어 저장된다. */
+const paraTexts = (inner: string): string[] =>
+  [...inner.matchAll(/<w:p(?: [^>]*)?>[\s\S]*?<\/w:p>/g)].map((p) => [...p[0].matchAll(/<w:t(?: [^>]*)?>([\s\S]*?)<\/w:t>/g)].map((t) => unescapeXml(t[1] ?? '')).join(''));
+
+/** 내려받은 DOCX 의 한 파일(기본은 본문)에 든 모든 글상자(그림 방식·옛 방식 모두)의 문단 글을 문서 순서대로 읽는다. */
+export async function readDocxBoxTexts(bytes: Buffer, part = 'word/document.xml'): Promise<string[]> {
+  const xml = (await readDocxPart(bytes, part)) ?? '';
+  return [...xml.matchAll(/<w:txbxContent>([\s\S]*?)<\/w:txbxContent>/g)].flatMap((m) => paraTexts(m[1] ?? ''));
+}
+
+/** 내려받은 DOCX 의 글상자 안의 글을 읽는다(시험 확인용. 그림 방식과 옛 방식 두 벌로 저장된 글상자만). */
+export async function readDocxBoxes(bytes: Buffer): Promise<DocxBoxesRead> {
+  const xml = (await readDocxPart(bytes, 'word/document.xml')) ?? '';
+  const sizeOf = (inner: string): number[] => [...inner.matchAll(/<w:p(?: [^>]*)?>[\s\S]*?<\/w:p>/g)].map((p) => Number(/<w:sz w:val="(\d+)"/.exec(p[0])?.[1] ?? 0) / 2);
+  const out: DocxBoxesRead = { choice: [], fallback: [], sizes: [] };
+  for (const ac of xml.matchAll(/<mc:AlternateContent[^>]*>[\s\S]*?<\/mc:AlternateContent>/g)) {
+    const content = (branch: string): string => /<w:txbxContent>([\s\S]*?)<\/w:txbxContent>/.exec(new RegExp(`<mc:${branch}[^>]*>([\\s\\S]*?)<\\/mc:${branch}>`).exec(ac[0])?.[1] ?? '')?.[1] ?? '';
+    out.choice.push(paraTexts(content('Choice')));
+    out.fallback.push(paraTexts(content('Fallback')));
+    out.sizes.push(sizeOf(content('Choice')));
+  }
+  return out;
 }

@@ -145,3 +145,55 @@ test('LibreOffice 로 만든 DOCX 의 머리말·꼬리말·각주 안의 글을
   soffice(dir, ['--convert-to', 'pdf', '--outdir', join(dir, 'pdf'), join(dir, 'edited.docx')]);
   expect(readFileSync(join(dir, 'pdf', 'edited.pdf')).subarray(0, 5).toString()).toBe('%PDF-');
 });
+
+// 글상자(텍스트 프레임) 둘이 든 문서. 글상자 1(문단 둘)은 첫 문단에, 글상자 2 는 셋째 문단에 놓인다.
+// 오탈자가 글상자 1 의 첫 문단("몇일")·둘째 문단("할려고"), 글상자 2("되요"), 본문("오랫만")에 하나씩 있다.
+// 글상자 앞뒤에 줄바꿈·들여쓰기를 넣지 않는다(공백이 문단 글에 남아 "겹친 띄어쓰기" 제안이 따로 생긴다).
+const BOXES_FODT = `<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.text">
+ <office:automatic-styles>
+  <style:style style:name="fr1" style:family="graphic"><style:graphic-properties style:wrap="parallel" style:horizontal-pos="right" style:horizontal-rel="paragraph" style:vertical-pos="top" style:vertical-rel="paragraph" fo:border="0.06pt solid #000000" fo:padding="0.2cm"/></style:style>
+ </office:automatic-styles>
+ <office:body><office:text>
+  <text:p>휴가 신청서<draw:frame draw:style-name="fr1" draw:name="글상자1" text:anchor-type="paragraph" svg:width="6cm" svg:height="2cm" draw:z-index="0"><draw:text-box><text:p>신청 기간은 몇일 입니다</text:p><text:p>담당자가 할려고 합니다</text:p></draw:text-box></draw:frame></text:p>
+  <text:p>오랫만에 쉬겠습니다.</text:p>
+  <text:p>비고란을 확인해 주세요.<draw:frame draw:style-name="fr1" draw:name="글상자2" text:anchor-type="paragraph" svg:width="6cm" svg:height="2cm" draw:z-index="1"><draw:text-box><text:p>비고: 되요 라고 적습니다</text:p></draw:text-box></draw:frame></text:p>
+ </office:text></office:body>
+</office:document>`;
+
+test('LibreOffice 로 만든 DOCX 의 글상자 안의 글을 고쳐 내려받으면, LibreOffice 가 열었을 때 글상자 둘이 그대로 있고 그 안의 글만 고쳐져 있다', async ({ page }) => {
+  expect(SOFFICE, 'LibreOffice(soffice)를 찾을 수 없어요. 설치하거나 REQUIRE_SOFFICE 를 빼세요.').not.toBe('');
+  const dir = mkdtempSync(join(tmpdir(), 'alldoc-interop-'));
+  writeFileSync(join(dir, 'boxes.fodt'), BOXES_FODT);
+  soffice(dir, ['--convert-to', 'docx:MS Word 2007 XML', '--outdir', dir, join(dir, 'boxes.fodt')]);
+  const original = readFileSync(join(dir, 'boxes.docx'));
+
+  await loginAs(page);
+  await openFile(page, { name: 'boxes.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: original });
+  await askAi(page, '맞춤법');
+  await page.getByRole('button', { name: '변경 내역 보기' }).click();
+  const cards = page.getByTestId('proposal-card');
+  await expect(cards).toHaveCount(4);
+  const place = (title: string) => cards.filter({ hasText: title }).getByTestId('proposal-place');
+  // LibreOffice 는 글상자를 그림 방식과 옛 방식 두 벌로 저장하고, 편집기 안에서의 글상자 번호가 건너뛰기도 한다. 화면에 보이는 번호(1, 2)로 알려 준다.
+  await expect(place('"몇일" 고치기')).toHaveText('글상자 1');
+  await expect(place('"할려고" 고치기')).toHaveText('글상자 1');
+  await expect(place('"되요" 고치기')).toHaveText('글상자 2');
+  await expect(place('"오랫만" 고치기')).toHaveCount(0);
+  await page.getByRole('button', { name: '전체 적용' }).click();
+  await expect(page.locator('.toast').last()).toContainText('4개를 적용했어요');
+
+  const edited = (await downloadAs(page)).bytes;
+  writeFileSync(join(dir, 'edited.docx'), edited);
+
+  // 제3자 프로그램이 읽는다: 열리고, 글상자 둘이 그대로 있고, 글상자 안팎의 오탈자가 고쳐져 있고, 고치지 않은 글은 그대로다.
+  soffice(dir, ['--convert-to', 'fodt', '--outdir', join(dir, 'fodt'), join(dir, 'edited.docx')]);
+  const flat = readFileSync(join(dir, 'fodt', 'edited.fodt'), 'utf8');
+  for (const fixed of ['신청 기간은 며칠 입니다', '담당자가 하려고 합니다', '비고: 돼요 라고 적습니다', '오랜만에 쉬겠습니다', '휴가 신청서', '비고란을 확인해 주세요']) expect(flat, `${fixed} 가 없어요`).toContain(fixed);
+  for (const typo of ['몇일', '할려고', '되요', '오랫만']) expect(flat, `${typo} 가 남아 있어요`).not.toContain(typo);
+  // LibreOffice 는 읽어 들인 글상자를 도형(draw:custom-shape)으로 다시 저장한다. 이름(글상자1·2)이 하나씩 있으면 글상자가 없어지거나 늘어나지 않은 것이다.
+  expect(flat.match(/draw:name="글상자\d"/g)).toHaveLength(2);
+  // PDF 로도 열린다.
+  soffice(dir, ['--convert-to', 'pdf', '--outdir', join(dir, 'pdf'), join(dir, 'edited.docx')]);
+  expect(readFileSync(join(dir, 'pdf', 'edited.pdf')).subarray(0, 5).toString()).toBe('%PDF-');
+});
