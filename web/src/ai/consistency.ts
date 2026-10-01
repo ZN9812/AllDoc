@@ -1,7 +1,7 @@
 // 서식 점검: AI 없이 문서 안에서 바로 계산한다(로그인 불필요).
 //  - 문서 안 일관성: 같은 역할의 문단(번호 항목, 본문 등)끼리 글꼴·크기·정렬·줄 간격이 다른 "소수"를 찾는다.
 //  - 기준 문서: 양식 문서에서 역할별 대표 서식을 뽑아, 내 문서를 그 서식에 맞추는 제안을 만든다.
-import { eulReul, eunNeun, iGa, type Align, type CharStyle, type DocSummary, type Op, type ParagraphInfo, type ParaStyle, type Proposal, type StyleProfile } from '@alldoc/shared';
+import { eulReul, eunNeun, iGa, isBodyParagraph, type Align, type CharStyle, type DocSummary, type Op, type ParagraphInfo, type ParaStyle, type Proposal, type StyleProfile } from '@alldoc/shared';
 
 export type Role = 'title' | 'level1' | 'level2' | 'level3' | 'level4' | 'bullet' | 'body';
 
@@ -83,11 +83,11 @@ function opFor(attr: Attr, paragraph: number, v: AttrValue): Op {
 }
 
 /**
- * 서식 비교(문서 안 일관성·기준 문서)에서는 표 칸 안의 문단을 뺀다.
- * 표 칸의 글(제목 칸, 값 칸, 머리 칸 등)은 칸마다 서식이 다른 게 보통이라 본문과 한데 묶으면 "서식이 다르다"는 잘못된 지적이 나온다.
- * 표 안의 글은 AI 대화(맞춤법·말투)와 내 규칙에서 다룬다.
+ * 서식 비교(문서 안 일관성·기준 문서)에서는 본문 문단만 쓰고, 표 칸·머리말·꼬리말·각주·미주 안의 문단은 뺀다.
+ * 표 칸의 글(제목 칸, 값 칸, 머리 칸 등)과 머리말·꼬리말·각주는 본문과 서식이 다른 게 보통이라 한데 묶으면 "서식이 다르다"는 잘못된 지적이 나온다.
+ * 그곳의 글은 AI 대화(맞춤법·말투)와 내 규칙에서 다룬다.
  */
-export const outsideTables = (paragraphs: ParagraphInfo[]): ParagraphInfo[] => paragraphs.filter((p) => !p.cell);
+export const bodyParagraphs = (paragraphs: ParagraphInfo[]): ParagraphInfo[] => paragraphs.filter(isBodyParagraph);
 
 /** 내용이 있는 문단에 역할을 붙인다. 첫 문단이 가운데 정렬이고 본문보다 크면 제목으로 본다. */
 export function assignRoles(paragraphs: ParagraphInfo[]): Array<{ p: ParagraphInfo; role: Role }> {
@@ -155,7 +155,7 @@ const CHECKED: Record<Role, Attr[]> = {
 
 /** 같은 역할 문단 중 소수만 다른 곳을 찾는다. 집단이 3개 이상이고, 다른 쪽이 35% 이하일 때만 지적한다. */
 export function analyzeConsistency(summary: DocSummary): ConsistencyResult {
-  const items = assignRoles(outsideTables(summary.paragraphs));
+  const items = assignRoles(bodyParagraphs(summary.paragraphs));
   const byRole = new Map<Role, ParagraphInfo[]>();
   for (const { p, role } of items) byRole.set(role, [...(byRole.get(role) ?? []), p]);
 
@@ -215,7 +215,7 @@ function checkNumbering(items: Array<{ p: ParagraphInfo; role: Role }>): Numberi
 
 /** 기준 문서에서 역할별 대표 서식을 뽑는다. */
 export function buildProfile(summary: DocSummary, source: string): StyleProfile {
-  const items = assignRoles(outsideTables(summary.paragraphs));
+  const items = assignRoles(bodyParagraphs(summary.paragraphs));
   const byRole = new Map<Role, ParagraphInfo[]>();
   for (const { p, role } of items) byRole.set(role, [...(byRole.get(role) ?? []), p]);
 
@@ -240,7 +240,7 @@ export function buildProfile(summary: DocSummary, source: string): StyleProfile 
 
 /** 내 문서를 기준 문서의 서식에 맞추는 제안(역할별로 글꼴·크기·정렬·줄 간격이 다른 문단 전부) */
 export function compareToProfile(summary: DocSummary, profile: StyleProfile): Proposal[] {
-  const items = assignRoles(outsideTables(summary.paragraphs));
+  const items = assignRoles(bodyParagraphs(summary.paragraphs));
   const proposals: Proposal[] = [];
   const roles = Object.keys(ROLE_LABEL) as Role[];
 

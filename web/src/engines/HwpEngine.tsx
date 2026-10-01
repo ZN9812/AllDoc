@@ -1,6 +1,6 @@
 import { createStudio, type RhwpEditor } from '@rhwp/editor';
 import { useEffect, useRef, useState } from 'react';
-import { KIND_MIME } from '@alldoc/shared';
+import { areaLabel, areaName, KIND_MIME, type AreaPlace } from '@alldoc/shared';
 import { loadHwpCore } from './hwp/core';
 import { HwpModel, type CellFocus, type HwpFormat } from './hwp/model';
 import type { ApplyFailure, EngineHandle, EngineProps, ExportOption } from './types';
@@ -39,6 +39,18 @@ async function studioInstalled(): Promise<boolean> {
 }
 
 const failed = (message: string): ApplyFailure => ({ ok: false, reason: 'failed', message });
+
+/** 머리말·꼬리말·각주·미주 안의 글은 편집기가 바로 이동하지 못해서, 그것을 정의했거나 단 본문 문단으로 이동한다. 그렇다고 알리는 문구. */
+function areaNotice(area: AreaPlace, focused: boolean): string {
+  const label = areaLabel(area);
+  if (!focused) return `${label}이(가) 있는 곳으로 이동하지 못했어요. 카드에 적힌 위치를 보고 직접 찾아 주세요.`;
+  if (area.kind === 'header' || area.kind === 'footer') {
+    const name = areaName(area);
+    return `이 글은 ${label}에 있어요. 한글 편집기가 ${name}로 바로 이동하지는 못해서, ${name}을 넣은 문단으로 이동했어요.`;
+  }
+  const name = areaName(area);
+  return `이 글은 ${label}에 있어요. 한글 편집기가 ${name}로 바로 이동하지는 못해서, ${name}를 단 문단으로 이동했어요.`;
+}
 
 /** 빌드 때 편집기에 끼운 이동 함수(window.__alldocFocusCell). 편집기가 같은 출처에서 열리므로 우리 앱이 직접 부를 수 있다. */
 type FocusCell = (position: CellFocus['position'], end?: number) => boolean;
@@ -209,7 +221,9 @@ export default function HwpEngine({ doc, onReady, onDirty, onPages, onError, onN
                 } catch {
                   // 편집기가 이 문단으로의 이동을 거절했다.
                 }
-                if (loc.inTable) {
+                if (loc.area) {
+                  onNotice?.(areaNotice(loc.area, focused));
+                } else if (loc.inTable) {
                   const big = '이 표는 아주 커서, 칸으로 바로 이동하면 화면이 오래 멈춰요.';
                   onNotice?.(
                     focused

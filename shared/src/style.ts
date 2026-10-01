@@ -46,14 +46,41 @@ export type CellPlace = z.infer<typeof CellPlaceSchema>;
 /** 사람에게 보여 줄 위치 문구. 예: "표 2 · 3행 1열" */
 export const placeLabel = (c: CellPlace): string => `표 ${c.table} · ${c.row}행 ${c.col}열${c.depth > 1 ? ' (표 안의 표)' : ''}`;
 
+/** 본문 밖의 글(머리말·꼬리말·각주·미주) 문단이 어디에 있는지. 본문과 표 칸의 문단에는 없다. */
+export const AreaPlaceSchema = z.object({
+  kind: z.enum(['header', 'footer', 'footnote', 'endnote']),
+  /** 머리말·꼬리말이 적용되는 쪽(양쪽·짝수 쪽·홀수 쪽) */
+  pages: z.enum(['both', 'even', 'odd']).optional(),
+  /** 각주·미주 번호(1부터, 문서에 달린 순서) */
+  number: z.number().int().min(1).optional(),
+  /** 구역 번호(1부터). 구역이 둘 이상인 문서에서만 붙는다. */
+  section: z.number().int().min(1).optional(),
+});
+export type AreaPlace = z.infer<typeof AreaPlaceSchema>;
+
+const AREA_NAME: Record<AreaPlace['kind'], string> = { header: '머리말', footer: '꼬리말', footnote: '각주', endnote: '미주' };
+const PAGES_NAME: Record<NonNullable<AreaPlace['pages']>, string> = { both: '', even: '짝수 쪽', odd: '홀수 쪽' };
+
+/** 영역의 이름만(번호·쪽 없이). 예: "각주" */
+export const areaName = (a: AreaPlace): string => AREA_NAME[a.kind];
+
+/** 사람에게 보여 줄 위치 문구. 예: "머리말", "꼬리말(홀수 쪽)", "각주 3", "머리말 · 구역 2" */
+export function areaLabel(a: AreaPlace): string {
+  const pages = a.pages ? PAGES_NAME[a.pages] : '';
+  const head = `${AREA_NAME[a.kind]}${a.number !== undefined ? ` ${a.number}` : ''}${pages ? `(${pages})` : ''}`;
+  return a.section !== undefined ? `${head} · 구역 ${a.section}` : head;
+}
+
 /** 문서의 문단 하나. index 는 각 편집기 연결부가 정한 번호이고 변경 제안이 이 번호를 가리킨다. */
 export const ParagraphInfoSchema = z.object({
   index: z.number().int().min(0),
   text: z.string(),
   char: CharStyleSchema,
   para: ParaStyleSchema,
-  /** 표 칸 안의 문단이면 그 위치. 서식 점검(문서 안 일관성·기준 문서)은 표 밖 문단만 비교한다. */
+  /** 표 칸 안의 문단이면 그 위치. 서식 점검(문서 안 일관성·기준 문서)은 표 밖 본문 문단만 비교한다. */
   cell: CellPlaceSchema.optional(),
+  /** 머리말·꼬리말·각주·미주 안의 문단이면 그 위치. 서식 점검은 본문 문단만 비교한다. */
+  area: AreaPlaceSchema.optional(),
 });
 export type ParagraphInfo = z.infer<typeof ParagraphInfoSchema>;
 
@@ -81,3 +108,13 @@ export const StyleProfileSchema = z.object({
     .max(40),
 });
 export type StyleProfile = z.infer<typeof StyleProfileSchema>;
+
+/** 문단이 본문 문단인가(표 칸·머리말·꼬리말·각주·미주 안이 아니라). 서식 점검은 본문 문단만 비교한다. */
+export const isBodyParagraph = (p: Pick<ParagraphInfo, 'cell' | 'area'>): boolean => p.cell === undefined && p.area === undefined;
+
+/** 문단의 위치 문구(표 칸이나 머리말·각주 등). 본문 문단이면 undefined. */
+export function placeOfParagraph(p: Pick<ParagraphInfo, 'cell' | 'area'>): string | undefined {
+  if (p.cell) return placeLabel(p.cell);
+  if (p.area) return areaLabel(p.area);
+  return undefined;
+}

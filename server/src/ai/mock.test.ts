@@ -83,3 +83,30 @@ describe('데모 AI와 표 칸 안의 글', () => {
     for (const p of r.proposals) expect(p.ops.map((o) => o.paragraph)).toEqual([0, 3]);
   });
 });
+
+describe('데모 AI와 머리말·꼬리말·각주 안의 글', () => {
+  const mock = new MockProvider();
+  const document = {
+    kind: 'hwp' as const,
+    paragraphs: [
+      { index: 0, text: '머리말 몇일', char: { fontFamily: '굴림', fontSizePt: 9 }, para: { lineSpacingPct: 100 }, area: { kind: 'header' as const, pages: 'both' as const } },
+      { index: 1, text: '본문 몇일 뒤', char: { fontFamily: '굴림', fontSizePt: 12 }, para: { lineSpacingPct: 150 } },
+      { index: 2, text: '각주 몇일', char: {}, para: { lineSpacingPct: 130 }, area: { kind: 'footnote' as const, number: 1 } },
+    ],
+  };
+
+  it('맞춤법은 머리말·각주 안의 글에도 적용한다', async () => {
+    const r = await mock.propose({ request: req({ document }) });
+    const typo = r.proposals.find((p) => p.title === '"몇일" 고치기');
+    expect(typo?.ops.map((o) => o.paragraph)).toEqual([0, 1, 2]);
+  });
+
+  it('서식 규칙은 본문에만 적용하고, 규칙에 머리말·각주가 적혀 있으면 그곳도 포함한다', async () => {
+    const only = await mock.propose({ request: req({ mode: 'format_check', criteria: 'rules', rulesText: '본문은 맑은 고딕 11pt', document }) });
+    for (const p of only.proposals) expect(p.ops.map((o) => o.paragraph)).toEqual([1]);
+    const header = await mock.propose({ request: req({ mode: 'format_check', criteria: 'rules', rulesText: '머리말도 맑은 고딕 11pt', document }) });
+    for (const p of header.proposals) expect(p.ops.map((o) => o.paragraph)).toEqual([0, 1]);
+    const note = await mock.propose({ request: req({ mode: 'format_check', criteria: 'rules', rulesText: '각주는 줄 간격 160%', document }) });
+    for (const p of note.proposals) expect(p.ops.map((o) => o.paragraph)).toEqual([1, 2]);
+  });
+});

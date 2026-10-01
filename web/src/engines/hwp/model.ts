@@ -1,12 +1,15 @@
 // 한글(HWP·HWPX) 문서의 읽기와 변경. @rhwp/core(WASM)의 문서 객체를 감싸서 화면과 무관하게 동작한다.
 //
-// 문단 번호: 문서 순서로 센 "문단 칸"의 번호(0부터). 본문 문단 다음에, 그 문단에 놓인 표의 칸 안 문단(표 안의 표 포함)이 이어진다.
-//   표가 없는 문서에서는 본문 문단 번호(구역을 이어 붙인 번호)와 같다.
-//   머리말·꼬리말, 각주, 글상자 안의 글은 다루지 않는다.
+// 문단 번호: 문서 순서로 센 "문단 칸"의 번호(0부터).
+//   머리말(모든 구역)이 맨 앞에 오고, 그다음 본문 문단이 이어진다. 본문 문단 다음에는 그 문단에 놓인 표의 칸 안 문단(표 안의 표 포함)과
+//   그 문단에 달린 각주·미주 문단이 이어지고, 꼬리말이 맨 끝에 온다.
+//   머리말·꼬리말·각주가 없고 표도 없는 문서에서는 본문 문단 번호(구역을 이어 붙인 번호)와 같다.
+//   글상자 안의 글과, 표 안에 달린 각주는 다루지 않는다(코어가 그 위치를 가리키는 방법을 주지 않는다).
 // 글자 위치: 코어는 유니코드 "글자"(코드 포인트) 단위로 센다. 자바스크립트 문자열 위치(UTF-16)와 다를 수 있어 바꿔서 쓴다.
 import {
   textGuard,
   type Align,
+  type AreaPlace,
   type CellPlace,
   type CharStyle,
   type DocSummary,
@@ -54,7 +57,26 @@ export interface HwpDocLike {
   getCellParaPropertiesAt(section: number, parentPara: number, control: number, cell: number, cellPara: number): string;
   applyParaFormatInCell(section: number, parentPara: number, control: number, cell: number, cellPara: number, propsJson: string): string;
 
-  /** 문서 안 모든 컨트롤의 목록. 표 안의 표가 있는지 미리 알아 불필요한 탐색을 줄이는 데 쓴다(없으면 항상 탐색한다). */
+  // 머리말·꼬리말: (구역, 머리말인지, 적용 쪽(0 양쪽, 1 짝수 쪽, 2 홀수 쪽), 그 안의 문단 번호)로 가리킨다.
+  getHeaderFooterList(currentSection: number, currentIsHeader: boolean, currentApplyTo: number): string;
+  getHeaderFooter(section: number, isHeader: boolean, applyTo: number): string;
+  getHeaderFooterParaInfo(section: number, isHeader: boolean, applyTo: number, hfPara: number): string;
+  getCharPropertiesInHeaderFooter(section: number, isHeader: boolean, applyTo: number, hfPara: number, offset: number): string;
+  getParaPropertiesInHf(section: number, isHeader: boolean, applyTo: number, hfPara: number): string;
+  insertTextInHeaderFooter(section: number, isHeader: boolean, applyTo: number, hfPara: number, offset: number, text: string): string;
+  deleteTextInHeaderFooter(section: number, isHeader: boolean, applyTo: number, hfPara: number, offset: number, count: number): string;
+  applyCharFormatInHeaderFooter(section: number, isHeader: boolean, applyTo: number, startPara: number, startOffset: number, endPara: number, endOffset: number, propsJson: string): string;
+  applyParaFormatInHf(section: number, isHeader: boolean, applyTo: number, hfPara: number, propsJson: string): string;
+
+  // 각주·미주: 본문에 놓인 것만 (구역, 그것을 단 본문 문단, 그 문단 안 컨트롤 번호, 각주 안 문단 번호)로 가리킬 수 있다.
+  // 코어에는 각주 안 글자 서식을 읽고 쓰는 함수가 없어서, 글 바꾸기와 문단 서식만 된다.
+  getFootnoteInfo(section: number, para: number, control: number): string;
+  getParaPropertiesInFootnote(section: number, para: number, control: number, fnPara: number): string;
+  insertTextInFootnote(section: number, para: number, control: number, fnPara: number, offset: number, text: string): string;
+  deleteTextInFootnote(section: number, para: number, control: number, fnPara: number, offset: number, count: number): string;
+  applyParaFormatInFootnote(section: number, para: number, control: number, fnPara: number, propsJson: string): string;
+
+  /** 문서 안 모든 컨트롤의 목록(문단 번호는 구역을 이어 붙인 번호). 표 안의 표·각주가 있는지 미리 알아 불필요한 탐색을 줄이고, 각주·미주를 찾는 데 쓴다(없으면 항상 탐색한다). */
   getControls?(): string;
   /** 묶음 모드: 그 사이의 변경은 쪽 나누기 계산을 건너뛰고, 끝낼 때 한 번만 한다(큰 문서에서 수백 배 빠르다). */
   beginBatch?(): string;
@@ -95,7 +117,44 @@ interface CellSlot {
   tableWeight: number;
 }
 
-type Slot = BodySlot | CellSlot;
+/** 머리말·꼬리말 안의 문단 */
+interface HfSlot {
+  kind: 'hf';
+  sec: number;
+  isHeader: boolean;
+  /** 적용 쪽: 0 양쪽, 1 짝수 쪽, 2 홀수 쪽 */
+  applyTo: number;
+  /** 머리말·꼬리말 안의 문단 번호 */
+  para: number;
+  /** 이 머리말·꼬리말을 정의한 본문 문단(구역 안 번호). 편집기가 이 문단으로만 이동할 수 있어 "문서에서 보기"에 쓴다. */
+  host: number;
+  place: AreaPlace;
+}
+
+/** 각주·미주 안의 문단 */
+interface NoteSlot {
+  kind: 'note';
+  sec: number;
+  /** 이 각주를 단 본문 문단(구역 안 번호) */
+  host: number;
+  /** 그 문단 안에서 각주 컨트롤의 번호 */
+  control: number;
+  /** 각주 안의 문단 번호 */
+  para: number;
+  place: AreaPlace;
+}
+
+type Slot = BodySlot | CellSlot | HfSlot | NoteSlot;
+
+/**
+ * 각주 첫 문단의 맨 앞 글자는 번호 자리(자동 번호)이고 코어는 그것을 공백 한 글자로 보여 준다. 그 글자는 지우거나 바꾸면 번호가 깨지므로
+ * 우리가 읽는 글에서는 빼고 다룬다(바꿀 글의 위치에는 그만큼을 더해 코어에 넘긴다).
+ */
+const noteHidden = (slot: NoteSlot, full: string): number => (slot.para === 0 && /^\s/u.test(full) ? 1 : 0);
+
+/** 머리말·꼬리말·각주 문단에서 바꾸면 안 되는 자리: 쪽 번호 같은 자동 항목이 글 사이에 든 자리(코어가 조절 문자로 보여 준다). */
+const PROTECTED_CHARS = /[\u0000-\u0008\u000B-\u001F]/u;
+const PROTECTED_CHARS_ALL = /[\u0000-\u0008\u000B-\u001F]/gu;
 
 /** 편집기가 표 칸으로 이동할 때 받는 위치(편집기의 DocumentPosition 과 같은 모양) */
 export interface CellFocus {
@@ -122,6 +181,8 @@ const MAX_TABLE_DEPTH = 8;
 const MAX_SLOTS = 200_000;
 /** 한 문단 안의 컨트롤을 이 수까지만 살핀다. */
 const MAX_CONTROLS_PER_PARAGRAPH = 64;
+/** 머리말·꼬리말 하나, 각주 하나가 담는 문단을 이 수까지만 읽는다. */
+const MAX_AREA_PARAGRAPHS = 500;
 /**
  * 편집기를 표 칸으로 이동시키는 데 걸리는 시간은 가장 바깥 표의 크기에 따라 크게 달라진다. 실제 문서 11개(표 하나당 문단 70개 이하)에서는
  * 글을 선택해도 3~22ms 였지만, 한 표에 문단이 1,588개 든 문서에서는 선택하면 칸 크기와 상관없이 약 13초, 캐럿만 옮겨도 칸에 따라 최대 8초가 걸렸다
@@ -172,8 +233,22 @@ export interface ExportedBytes {
   lossCount: number;
 }
 
+/** getControls() 가 돌려주는 컨트롤 하나(여기서 쓰는 것만) */
+interface ControlEntry {
+  ctrlId: string;
+  /** 0 은 본문. 그 밖은 표 칸 같은 안쪽 목록의 번호 */
+  list: number;
+  /** 본문(list 0)이면 구역을 이어 붙인 문서 전체 문단 번호, 그 밖이면 그 목록 안 문단 번호 */
+  para: number;
+  controlIndex: number;
+}
+
 export class HwpModel {
   private slots: Slot[] | null = null;
+  /** getControls() 를 한 번 읽은 결과(없거나 읽지 못하면 null) */
+  private controlMemo: ControlEntry[] | null | undefined;
+  /** 읽지 못한 각주·미주의 수(표 안에 달린 것은 코어가 위치를 가리키는 방법을 주지 않는다) */
+  private unreadableNotes = 0;
 
   constructor(
     private readonly doc: HwpDocLike,
@@ -188,21 +263,107 @@ export class HwpModel {
     return this.slots;
   }
 
-  private mayHaveNestedTables(): boolean {
-    if (!this.doc.getControls) return true;
+  /** 문서 안 모든 컨트롤의 목록을 한 번만 읽는다. 읽을 수 없으면 null. */
+  private controls(): ControlEntry[] | null {
+    if (this.controlMemo !== undefined) return this.controlMemo;
+    this.controlMemo = null;
+    if (!this.doc.getControls) return null;
     try {
-      const list = JSON.parse(this.doc.getControls()) as Array<{ ctrlId?: string; list?: number }>;
-      return list.some((c) => c.ctrlId === 'tbl' && c.list !== 0);
+      const raw = JSON.parse(this.doc.getControls()) as Array<Partial<ControlEntry>>;
+      this.controlMemo = raw.flatMap((c) =>
+        typeof c.ctrlId === 'string' && typeof c.list === 'number' && typeof c.para === 'number' && typeof c.controlIndex === 'number'
+          ? [{ ctrlId: c.ctrlId.trim(), list: c.list, para: c.para, controlIndex: c.controlIndex }]
+          : [],
+      );
     } catch {
-      return true;
+      this.controlMemo = null;
     }
+    return this.controlMemo;
   }
 
+  private mayHaveNestedTables(): boolean {
+    const list = this.controls();
+    return list === null ? true : list.some((c) => c.ctrlId === 'tbl' && c.list !== 0);
+  }
+
+  /** 문단 칸 전체: 머리말, 본문(표 칸·각주 포함), 꼬리말 순서 */
   private buildSlots(): Slot[] {
+    const body = this.buildBodySlots();
+    const { headers, footers } = this.buildHeaderFooterSlots();
+    return [...headers, ...body, ...footers];
+  }
+
+  /** 머리말·꼬리말 문단 칸. 구역 순서로, 같은 구역에서는 양쪽·홀수 쪽·짝수 쪽 순서로 센다. */
+  private buildHeaderFooterSlots(): { headers: HfSlot[]; footers: HfSlot[] } {
+    const out = { headers: [] as HfSlot[], footers: [] as HfSlot[] };
+    let items: Array<{ sectionIdx: number; isHeader: boolean; applyTo: number }>;
+    try {
+      items = (JSON.parse(this.doc.getHeaderFooterList(0, true, 0)) as { items?: typeof items }).items ?? [];
+    } catch {
+      return out;
+    }
+    const pageOrder = [0, 2, 1];
+    items = [...items].sort((a, b) => a.sectionIdx - b.sectionIdx || pageOrder.indexOf(a.applyTo) - pageOrder.indexOf(b.applyTo));
+    const sections = this.doc.getSectionCount();
+    for (const item of items) {
+      let info: { exists?: boolean; paraCount?: number; paraIndex?: number };
+      try {
+        info = JSON.parse(this.doc.getHeaderFooter(item.sectionIdx, item.isHeader, item.applyTo)) as typeof info;
+      } catch {
+        continue;
+      }
+      if (!info.exists) continue;
+      const pages = item.applyTo === 1 ? 'even' : item.applyTo === 2 ? 'odd' : 'both';
+      const place: AreaPlace = { kind: item.isHeader ? 'header' : 'footer', pages, ...(sections > 1 ? { section: item.sectionIdx + 1 } : {}) };
+      const target = item.isHeader ? out.headers : out.footers;
+      for (let q = 0; q < Math.min(info.paraCount ?? 0, MAX_AREA_PARAGRAPHS); q++) {
+        target.push({ kind: 'hf', sec: item.sectionIdx, isHeader: item.isHeader, applyTo: item.applyTo, para: q, host: info.paraIndex ?? 0, place });
+      }
+    }
+    return out;
+  }
+
+  private buildBodySlots(): Slot[] {
     const doc = this.doc;
     const out: Slot[] = [];
     const probeNested = this.mayHaveNestedTables();
     let tables = 0;
+
+    // 각주·미주는 getControls() 로 위치를 알아낸다(그 목록의 문단 번호는 구역을 이어 붙인 번호라서 구역·구역 안 번호로 바꾼다).
+    const sections = doc.getSectionCount();
+    const sectionStart: number[] = [];
+    for (let s = 0, acc = 0; s < sections; s++) {
+      sectionStart.push(acc);
+      acc += doc.getParagraphCount(s);
+    }
+    const notesAt = new Map<string, 'footnote' | 'endnote'>();
+    this.unreadableNotes = 0;
+    for (const c of this.controls() ?? []) {
+      if (c.ctrlId !== 'fn' && c.ctrlId !== 'en') continue;
+      if (c.list !== 0) {
+        this.unreadableNotes++;
+        continue;
+      }
+      let s = sectionStart.length - 1;
+      while (s > 0 && (sectionStart[s] as number) > c.para) s--;
+      notesAt.set(`${s}:${c.para - (sectionStart[s] as number)}:${c.controlIndex}`, c.ctrlId === 'en' ? 'endnote' : 'footnote');
+    }
+    /** 이 각주·미주 안의 문단 칸을 담는다. */
+    const pushNote = (sec: number, host: number, control: number, kind: 'footnote' | 'endnote'): void => {
+      let info: { paraCount?: number; number?: number };
+      try {
+        info = JSON.parse(doc.getFootnoteInfo(sec, host, control)) as typeof info;
+      } catch {
+        this.unreadableNotes++;
+        return;
+      }
+      const place: AreaPlace = {
+        kind,
+        ...(typeof info.number === 'number' && info.number >= 1 ? { number: info.number } : {}),
+        ...(sections > 1 ? { section: sec + 1 } : {}),
+      };
+      for (let q = 0; q < Math.min(info.paraCount ?? 0, MAX_AREA_PARAGRAPHS) && out.length < MAX_SLOTS; q++) out.push({ kind: 'note', sec, host, control, para: q, place });
+    };
 
     const parse = <T>(raw: string): T => JSON.parse(raw) as T;
 
@@ -259,6 +420,11 @@ export class HwpModel {
         }
         if (!Array.isArray(positions)) continue;
         for (let c = 0; c < positions.length; c++) {
+          const note = notesAt.get(`${s}:${p}:${c}`);
+          if (note) {
+            pushNote(s, p, c, note);
+            continue;
+          }
           try {
             doc.getTableDimensions(s, p, c);
           } catch {
@@ -274,14 +440,18 @@ export class HwpModel {
     return out;
   }
 
-  /** 문서 구조의 크기(시험·진단용): 본문 문단 수, 표 칸 안 문단 수, 표 수(표 안의 표 포함) */
-  describeStructure(): { bodyParagraphs: number; cellParagraphs: number; tables: number } {
+  /** 문서 구조의 크기(시험·진단용): 본문 문단 수, 표 칸 안 문단 수, 표 수(표 안의 표 포함), 머리말·꼬리말 문단 수, 각주·미주 문단 수, 읽지 못한 각주·미주 수 */
+  describeStructure(): { bodyParagraphs: number; cellParagraphs: number; tables: number; headerFooterParagraphs: number; noteParagraphs: number; unreadableNotes: number } {
     const list = this.slotList();
+    const count = (kind: Slot['kind']): number => list.filter((s) => s.kind === kind).length;
     const cells = list.filter((s): s is CellSlot => s.kind === 'cell');
     return {
-      bodyParagraphs: list.length - cells.length,
+      bodyParagraphs: count('body'),
       cellParagraphs: cells.length,
       tables: cells.reduce((max, c) => Math.max(max, c.place.table), 0),
+      headerFooterParagraphs: count('hf'),
+      noteParagraphs: count('note'),
+      unreadableNotes: this.unreadableNotes,
     };
   }
 
@@ -293,13 +463,24 @@ export class HwpModel {
 
   /**
    * 편집기에서 이 문단으로 이동하는 데 쓰는 위치(구역, 구역 안 문단 번호, 글자 수).
-   * 편집기는 표 칸으로 바로 이동하는 방법을 주지 않아서, 표 안의 문단은 그 표가 놓인 본문 문단으로 안내한다(inTable).
+   * 편집기의 공개 이동 수단은 본문 문단만 받아서, 표 안의 문단은 그 표가 놓인 본문 문단으로(inTable), 머리말·꼬리말·각주·미주 안의 문단은
+   * 그것을 정의했거나 단 본문 문단으로(area) 안내한다.
    */
-  paragraphTarget(index: number): { section: number; paragraph: number; length: number; inTable: boolean } | null {
+  paragraphTarget(index: number): { section: number; paragraph: number; length: number; inTable: boolean; area?: AreaPlace } | null {
     const slot = this.locate(index);
     if (!slot) return null;
     const para = slot.kind === 'body' ? slot.para : slot.host;
-    return { section: slot.sec, paragraph: para, length: this.doc.getParagraphLength(slot.sec, para), inTable: slot.kind === 'cell' };
+    try {
+      return {
+        section: slot.sec,
+        paragraph: para,
+        length: this.doc.getParagraphLength(slot.sec, para),
+        inTable: slot.kind === 'cell',
+        ...(slot.kind === 'hf' || slot.kind === 'note' ? { area: slot.place } : {}),
+      };
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -341,59 +522,157 @@ export class HwpModel {
 
   // ───────────────────────── 문단 칸 읽기·쓰기(본문과 표 칸을 같은 방식으로) ─────────────────────────
 
-  private len(slot: Slot): number {
-    return slot.kind === 'body' ? this.doc.getParagraphLength(slot.sec, slot.para) : this.doc.getCellParagraphLengthByPath(slot.sec, slot.host, slot.pathJson);
+  /** 각주·미주 안 문단들의 글(코어가 돌려주는 그대로: 첫 문단 맨 앞에 번호 자리가 공백으로 들어 있다) */
+  private noteTexts(slot: NoteSlot): string[] {
+    const info = JSON.parse(this.doc.getFootnoteInfo(slot.sec, slot.host, slot.control)) as { texts?: unknown };
+    return Array.isArray(info.texts) ? info.texts.map(String) : [];
+  }
+
+  private hfInfo(slot: HfSlot): { text: string; charCount: number } {
+    const info = JSON.parse(this.doc.getHeaderFooterParaInfo(slot.sec, slot.isHeader, slot.applyTo, slot.para)) as { text?: string; charCount?: number };
+    return { text: info.text ?? '', charCount: info.charCount ?? 0 };
   }
 
   private text(slot: Slot): string {
-    const len = this.len(slot);
-    if (len <= 0) return '';
-    return slot.kind === 'body' ? this.doc.getTextRange(slot.sec, slot.para, 0, len) : this.doc.getTextInCellByPath(slot.sec, slot.host, slot.pathJson, 0, len);
+    switch (slot.kind) {
+      case 'hf':
+        return this.hfInfo(slot).text;
+      case 'note': {
+        const full = this.noteTexts(slot)[slot.para] ?? '';
+        return full.slice(noteHidden(slot, full));
+      }
+      case 'body': {
+        const len = this.doc.getParagraphLength(slot.sec, slot.para);
+        return len <= 0 ? '' : this.doc.getTextRange(slot.sec, slot.para, 0, len);
+      }
+      case 'cell': {
+        const len = this.doc.getCellParagraphLengthByPath(slot.sec, slot.host, slot.pathJson);
+        return len <= 0 ? '' : this.doc.getTextInCellByPath(slot.sec, slot.host, slot.pathJson, 0, len);
+      }
+    }
   }
 
-  private charProps(slot: Slot, offset = 0): CoreChar {
-    const raw = slot.kind === 'body' ? this.doc.getCharPropertiesAt(slot.sec, slot.para, offset) : this.doc.getCellCharPropertiesAtByPath(slot.sec, slot.host, slot.pathJson, offset);
-    return JSON.parse(raw) as CoreChar;
+  /** 글자 서식. 읽을 수 없는 곳(각주·미주 안)은 null. */
+  private charProps(slot: Slot, offset = 0): CoreChar | null {
+    switch (slot.kind) {
+      case 'note':
+        return null;
+      case 'hf':
+        return JSON.parse(this.doc.getCharPropertiesInHeaderFooter(slot.sec, slot.isHeader, slot.applyTo, slot.para, offset)) as CoreChar;
+      case 'body':
+        return JSON.parse(this.doc.getCharPropertiesAt(slot.sec, slot.para, offset)) as CoreChar;
+      case 'cell':
+        return JSON.parse(this.doc.getCellCharPropertiesAtByPath(slot.sec, slot.host, slot.pathJson, offset)) as CoreChar;
+    }
   }
 
   /** 문단 서식. 읽을 수 없는 칸(표 안의 표)은 null. */
   private paraProps(slot: Slot): CorePara | null {
-    if (slot.kind === 'body') return JSON.parse(this.doc.getParaPropertiesAt(slot.sec, slot.para)) as CorePara;
-    if (slot.path.length > 1) return null;
-    const step = slot.path[0] as CellStep;
-    return JSON.parse(this.doc.getCellParaPropertiesAt(slot.sec, slot.host, step.controlIndex, step.cellIndex, step.cellParaIndex)) as CorePara;
+    switch (slot.kind) {
+      case 'body':
+        return JSON.parse(this.doc.getParaPropertiesAt(slot.sec, slot.para)) as CorePara;
+      case 'hf':
+        return JSON.parse(this.doc.getParaPropertiesInHf(slot.sec, slot.isHeader, slot.applyTo, slot.para)) as CorePara;
+      case 'note':
+        return JSON.parse(this.doc.getParaPropertiesInFootnote(slot.sec, slot.host, slot.control, slot.para)) as CorePara;
+      case 'cell': {
+        if (slot.path.length > 1) return null;
+        const step = slot.path[0] as CellStep;
+        return JSON.parse(this.doc.getCellParaPropertiesAt(slot.sec, slot.host, step.controlIndex, step.cellIndex, step.cellParaIndex)) as CorePara;
+      }
+    }
   }
 
   private applyChar(slot: Slot, start: number, end: number, props: Record<string, unknown>): boolean {
     const json = JSON.stringify(props);
-    return ok(slot.kind === 'body' ? this.doc.applyCharFormat(slot.sec, slot.para, start, end, json) : this.doc.applyCharFormatInCellByPath(slot.sec, slot.host, slot.pathJson, start, end, json));
+    switch (slot.kind) {
+      case 'note':
+        return false; // 코어에 각주 안 글자 서식을 바꾸는 함수가 없다.
+      case 'hf':
+        return ok(this.doc.applyCharFormatInHeaderFooter(slot.sec, slot.isHeader, slot.applyTo, slot.para, start, slot.para, end, json));
+      case 'body':
+        return ok(this.doc.applyCharFormat(slot.sec, slot.para, start, end, json));
+      case 'cell':
+        return ok(this.doc.applyCharFormatInCellByPath(slot.sec, slot.host, slot.pathJson, start, end, json));
+    }
   }
 
   private applyPara(slot: Slot, props: Record<string, unknown>): boolean {
     const json = JSON.stringify(props);
-    if (slot.kind === 'body') return ok(this.doc.applyParaFormat(slot.sec, slot.para, json));
-    const step = slot.path[0] as CellStep;
-    return slot.path.length === 1 && ok(this.doc.applyParaFormatInCell(slot.sec, slot.host, step.controlIndex, step.cellIndex, step.cellParaIndex, json));
+    switch (slot.kind) {
+      case 'body':
+        return ok(this.doc.applyParaFormat(slot.sec, slot.para, json));
+      case 'hf':
+        return ok(this.doc.applyParaFormatInHf(slot.sec, slot.isHeader, slot.applyTo, slot.para, json));
+      case 'note':
+        return ok(this.doc.applyParaFormatInFootnote(slot.sec, slot.host, slot.control, slot.para, json));
+      case 'cell': {
+        const step = slot.path[0] as CellStep;
+        return slot.path.length === 1 && ok(this.doc.applyParaFormatInCell(slot.sec, slot.host, step.controlIndex, step.cellIndex, step.cellParaIndex, json));
+      }
+    }
+  }
+
+  /** 머리말·꼬리말·각주 문단에 글을 끼워 넣는다(offset 은 우리가 읽는 글 기준). */
+  private insertIn(slot: HfSlot | NoteSlot, offset: number, text: string): boolean {
+    if (slot.kind === 'hf') return ok(this.doc.insertTextInHeaderFooter(slot.sec, slot.isHeader, slot.applyTo, slot.para, offset, text));
+    return ok(this.doc.insertTextInFootnote(slot.sec, slot.host, slot.control, slot.para, offset + this.noteBase(slot), text));
+  }
+
+  private deleteIn(slot: HfSlot | NoteSlot, offset: number, count: number): boolean {
+    if (slot.kind === 'hf') return ok(this.doc.deleteTextInHeaderFooter(slot.sec, slot.isHeader, slot.applyTo, slot.para, offset, count));
+    return ok(this.doc.deleteTextInFootnote(slot.sec, slot.host, slot.control, slot.para, offset + this.noteBase(slot), count));
+  }
+
+  /** 각주 문단에서 우리가 읽는 글의 시작이 코어 글자 위치로 몇 번째인가(번호 자리를 빼므로 0 또는 1) */
+  private noteBase(slot: NoteSlot): number {
+    return noteHidden(slot, this.noteTexts(slot)[slot.para] ?? '');
   }
 
   /**
    * 글자 위치 start 부터 length 글자를 replacement 로 바꾼다(위치와 길이는 코어의 글자 수 기준).
    * 본문은 코어의 글 바꾸기를 쓰고, 표 칸은 코어에 글 바꾸기가 없어서 "새 글을 옛 글 바로 뒤에 넣고 옛 글을 지운다".
    * 이렇게 하면 새 글이 옛 글의 서식을 이어받는다. 옛 글 안에서 글자 모양이 갈린 경우를 위해, 바꾼 뒤에는 옛 글 첫 글자의 글자 모양을 새 글에 그대로 입힌다.
+   * 머리말·꼬리말·각주는 코어의 글 바꾸기(머리말·꼬리말)가 새 글에 "바꾸는 글 바로 앞 글자"의 서식을 입혀서(굵은 낱말을 바꾸면 굵기가 사라진다) 쓰지 않고,
+   * 새 글을 옛 글의 첫 글자 바로 뒤에 넣어 그 글자의 서식을 그대로 이어받게 한 뒤 옛 글(첫 글자와 나머지)을 지운다.
    */
   private replaceRange(slot: Slot, start: number, length: number, replacement: string): boolean {
     if (slot.kind === 'body') return ok(this.doc.replaceText(slot.sec, slot.para, start, length, replacement));
+    if (slot.kind === 'hf' || slot.kind === 'note') return this.replaceInArea(slot, start, length, replacement);
 
     const added = codePointLength(replacement);
-    const shapeBefore = length > 0 && added > 0 ? this.charProps(slot, start).charShapeId : undefined;
+    const shapeBefore = length > 0 && added > 0 ? this.charProps(slot, start)?.charShapeId : undefined;
     if (added > 0 && !ok(this.doc.insertTextInCellByPath(slot.sec, slot.host, slot.pathJson, start + length, replacement))) return false;
     if (length > 0 && !ok(this.doc.deleteTextInCellByPath(slot.sec, slot.host, slot.pathJson, start, length))) {
       // 새 글은 이미 들어갔다: 지워서 원래대로 돌려 놓는다.
       if (added > 0) this.doc.deleteTextInCellByPath(slot.sec, slot.host, slot.pathJson, start + length, added);
       return false;
     }
-    if (shapeBefore !== undefined && this.charProps(slot, start).charShapeId !== shapeBefore) {
+    if (shapeBefore !== undefined && this.charProps(slot, start)?.charShapeId !== shapeBefore) {
       this.doc.setCharShapeIdInCellByPath(slot.sec, slot.host, slot.pathJson, start, start + added, shapeBefore);
+    }
+    return true;
+  }
+
+  private replaceInArea(slot: HfSlot | NoteSlot, start: number, length: number, replacement: string): boolean {
+    const added = codePointLength(replacement);
+    if (length === 0) return added === 0 || this.insertIn(slot, start, replacement);
+    if (added === 0) return this.deleteIn(slot, start, length);
+
+    const old = [...this.text(slot)].slice(start, start + length).join('');
+    // 1) 새 글을 옛 글의 첫 글자 바로 뒤에 넣는다(그 글자의 서식을 이어받는다).
+    if (!this.insertIn(slot, start + 1, replacement)) return false;
+    // 2) 옛 글의 나머지를 지운다.
+    if (length > 1 && !this.deleteIn(slot, start + 1 + added, length - 1)) {
+      this.deleteIn(slot, start + 1, added); // 새 글을 거둬 원래대로
+      return false;
+    }
+    // 3) 옛 글의 첫 글자를 지운다.
+    if (!this.deleteIn(slot, start, 1)) {
+      // 나머지 옛 글을 새 글 뒤에 다시 넣고 새 글을 거둔다(서식은 앞 글자를 따른다. 이 경로는 코어가 지우기를 거절할 때만 탄다).
+      if (length > 1) this.insertIn(slot, start + 1 + added, [...old].slice(1).join(''));
+      this.deleteIn(slot, start + 1, added);
+      return false;
     }
     return true;
   }
@@ -406,7 +685,9 @@ export class HwpModel {
     this.slotList().forEach((slot, index) => {
       const text = this.text(slot);
       if (text.trim().length === 0) return;
-      const c = this.charProps(slot);
+      // 쪽 번호 같은 자동 항목만 든 머리말·꼬리말 문단은 읽을 글이 없다.
+      if ((slot.kind === 'hf' || slot.kind === 'note') && text.replace(PROTECTED_CHARS_ALL, '').trim().length === 0) return;
+      const c = this.charProps(slot) ?? {};
       const pr = this.paraProps(slot) ?? {};
       const char: CharStyle = {};
       // 대표 글꼴은 한글(첫 칸)의 글꼴이다. 코어의 fontFamily 는 문단 첫 글자의 언어를 따라가서(숫자로 시작하면 영문 칸) 문단마다 달라질 수 있다.
@@ -422,6 +703,7 @@ export class HwpModel {
       if (pr.lineSpacingType === 'Percent' && typeof pr.lineSpacing === 'number') para.lineSpacingPct = Math.round(pr.lineSpacing);
       const info: ParagraphInfo = { index, text, char, para };
       if (slot.kind === 'cell') info.cell = slot.place;
+      else if (slot.kind === 'hf' || slot.kind === 'note') info.area = slot.place;
       paragraphs.push(info);
     });
     return { kind: this.format, paragraphs, pageCount: this.doc.pageCount() };
@@ -468,6 +750,9 @@ export class HwpModel {
 
   private replaceText(op: Extract<Op, { type: 'replaceText' }>, slot: Slot, cur: string): OneResult {
     if (/[\r\n]/.test(op.replace)) return unsupported('줄바꿈이 들어간 변경은 아직 적용할 수 없어요.');
+    if ((slot.kind === 'hf' || slot.kind === 'note') && (PROTECTED_CHARS.test(op.find) || PROTECTED_CHARS.test(op.replace))) {
+      return unsupported('쪽 번호 같은 자동 항목이 든 글은 바꿀 수 없어요.');
+    }
 
     let idx: number;
     if (op.find === '') {
@@ -498,6 +783,7 @@ export class HwpModel {
     const len = codePointLength(cur);
     if (len === 0) return stale('빈 문단에는 서식을 바꿀 수 없어요.');
     const before = this.charProps(slot);
+    if (!before) return unsupported('각주·미주 안의 글은 글자 서식(글꼴·크기·굵게 등)을 바꿀 수 없어요. 글 바꾸기와 문단 서식만 돼요.');
     const s = op.style;
     const props: Record<string, unknown> = {};
     const undo: CharStyle = {};
@@ -532,7 +818,7 @@ export class HwpModel {
     if (!this.applyChar(slot, 0, len, props)) return failed('한글 편집기가 글자 서식을 바꾸지 못했어요.');
 
     // 바뀐 결과를 다시 읽어 확인한다. 다르면 되돌리고 실패로 알린다.
-    const after = this.charProps(slot);
+    const after = this.charProps(slot) ?? {};
     const mismatch =
       (props.fontSize !== undefined && Math.round(after.fontSize ?? -1) !== props.fontSize) ||
       (s.fontFamily !== undefined && !s.fontFaces && (after.fontFamilies?.length === 7 ? after.fontFamilies.some((n) => n !== s.fontFamily) : after.fontFamily !== s.fontFamily)) ||

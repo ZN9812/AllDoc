@@ -4,7 +4,7 @@
 // 다만 REQUIRE_HWP_SAMPLES=1 이면(CI) 건너뛰지 않고 실패한다. 조용히 빠진 채로 통과하지 않게 하려는 것이다.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Op, ParagraphInfo } from '@alldoc/shared';
+import { textGuard, type Op, type ParagraphInfo } from '@alldoc/shared';
 import { describe, expect, it } from 'vitest';
 import { analyzeConsistency } from '../../ai/consistency';
 import { HwpModel, type HwpFormat } from './model';
@@ -130,6 +130,92 @@ describe.skipIf(files.length === 0 && !REQUIRED)('실제 한글 문서(예제 �
     expect(back.ok).toBe(true);
     expect(model.summarize().paragraphs).toEqual(before.paragraphs);
   }, 120_000);
+
+  // 머리말·꼬리말과 각주·미주: 모델이 센 것을 코어를 직접 훑어 센 것(독립된 경로)과 맞춰 본다.
+  it.each(files)('%s: 머리말·꼬리말·각주·미주 문단을 빠짐없이 센다(코어를 직접 훑어 센 것과 같다)', (name) => {
+    const { Doc, bytes, kind } = open(name);
+    const doc = new Doc(bytes);
+    const model = new HwpModel(doc, kind);
+    const st = model.describeStructure();
+
+    // 머리말·꼬리말: 목록의 각 항목이 담은 문단 수의 합
+    const items = (JSON.parse(doc.getHeaderFooterList(0, true, 0)) as { items?: Array<{ sectionIdx: number; isHeader: boolean; applyTo: number }> }).items ?? [];
+    const hf = items.reduce((n, it) => n + ((JSON.parse(doc.getHeaderFooter(it.sectionIdx, it.isHeader, it.applyTo)) as { paraCount?: number }).paraCount ?? 0), 0);
+    expect(st.headerFooterParagraphs, '머리말·꼬리말 문단 수').toBe(hf);
+
+    // 각주·미주: 모든 본문 문단의 모든 컨트롤을 찔러 보며 센다. 표 안에 달린 것은 getControls() 의 목록 번호(list)가 0 이 아니다.
+    let notes = 0;
+    for (let sec = 0; sec < doc.getSectionCount(); sec++) {
+      for (let p = 0; p < doc.getParagraphCount(sec); p++) {
+        const positions = JSON.parse(doc.getControlTextPositions(sec, p)) as unknown[];
+        for (let c = 0; c < positions.length; c++) {
+          try {
+            notes += (JSON.parse(doc.getFootnoteInfo(sec, p, c)) as { paraCount?: number }).paraCount ?? 0;
+          } catch {
+            // 각주·미주가 아닌 컨트롤
+          }
+        }
+      }
+    }
+    expect(st.noteParagraphs, '각주·미주 문단 수').toBe(notes);
+    const inCells = (JSON.parse(doc.getControls()) as Array<{ ctrlId: string; list: number }>).filter((c) => ['fn', 'en'].includes(c.ctrlId.trim()) && c.list !== 0).length;
+    expect(st.unreadableNotes, '읽지 못하는(표 안에 달린) 각주·미주 수').toBe(inCells);
+  });
+
+  const NOTES = 'footnote-01.hwp';
+  it.skipIf(!files.includes(NOTES))('각주가 든 문서: 본문에 단 각주 8개를 읽고(표 안의 1개는 못 읽는다), 고쳐 내보내도 같고, 되돌리면 처음과 같다', async () => {
+    const { Doc, bytes, kind } = open(NOTES);
+    const model = new HwpModel(new Doc(bytes), kind);
+    const before = model.summarize();
+    const notes = before.paragraphs.filter((p) => p.area?.kind === 'footnote');
+    expect(notes.map((p) => p.area?.number)).toEqual([1, 2, 4, 5, 6, 7, 8, 9]); // 3번은 표 칸 안에 달려 있다
+    expect(model.describeStructure()).toMatchObject({ noteParagraphs: 8, unreadableNotes: 1 });
+
+    const ops: Op[] = notes.map((p) => ({ type: 'replaceText', paragraph: p.index, find: [...p.text.trim()].slice(0, 2).join(''), replace: 'ZZ', guard: textGuard(p.text) }));
+    const applied = await model.apply(ops);
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true });
+    if (!applied.ok) return;
+    const edited = model.summarize();
+    const editedNotes = edited.paragraphs.filter((p) => p.area?.kind === 'footnote');
+    expect(editedNotes.every((p) => p.text.trimStart().startsWith('ZZ'))).toBe(true);
+    expect(editedNotes.map((p) => p.area?.number)).toEqual([1, 2, 4, 5, 6, 7, 8, 9]); // 번호는 그대로
+
+    const out = model.exportBytes();
+    expect(out.lossCount).toBe(0);
+    expect(new HwpModel(new Doc(out.bytes), kind).summarize().paragraphs).toEqual(edited.paragraphs);
+
+    expect((await model.apply(applied.inverse)).ok).toBe(true);
+    expect(model.summarize().paragraphs).toEqual(before.paragraphs);
+  });
+
+  // 구역이 셋인 문서(본문 문단 번호를 구역을 이어 붙여 센다)에서 둘째·셋째 구역에 각주와 머리말을 달아, 구역을 맞게 가리키는지 본다.
+  const SECTIONS = 'field-01.hwp';
+  it.skipIf(!files.includes(SECTIONS))('구역이 여럿인 문서: 둘째 구역의 각주와 셋째 구역의 머리말도 구역을 맞게 가리켜 읽고 고친다', async () => {
+    const { Doc, bytes, kind } = open(SECTIONS);
+    const built = new Doc(bytes);
+    expect(built.getSectionCount()).toBe(3);
+    const note = JSON.parse(built.insertFootnote(1, 0, 0)) as { paraIdx: number; controlIdx: number };
+    built.insertTextInFootnote(1, note.paraIdx, note.controlIdx, 0, 2, '둘째 구역 각주 몇일');
+    built.createHeaderFooter(2, true, 0);
+    built.insertTextInHeaderFooter(2, true, 0, 0, 0, '셋째 구역 머리말 오랫만');
+    const reopened = new Doc(new Uint8Array(built.exportHwp()));
+
+    const model = new HwpModel(reopened, kind);
+    const s = model.summarize();
+    const n = s.paragraphs.find((p) => p.text.includes('둘째 구역 각주'));
+    const h = s.paragraphs.find((p) => p.text.includes('셋째 구역 머리말'));
+    expect(n?.area).toMatchObject({ kind: 'footnote', section: 2 });
+    expect(h?.area).toMatchObject({ kind: 'header', section: 3 });
+
+    const r = await model.apply([
+      { type: 'replaceText', paragraph: (n as { index: number }).index, find: '몇일', replace: '며칠', guard: textGuard((n as { text: string }).text) },
+      { type: 'replaceText', paragraph: (h as { index: number }).index, find: '오랫만', replace: '오랜만', guard: textGuard((h as { text: string }).text) },
+    ]);
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
+    // 코어를 직접 읽어, 맞는 구역의 글이 고쳐졌는지 확인한다.
+    expect((JSON.parse(reopened.getFootnoteInfo(1, note.paraIdx, note.controlIdx)) as { texts: string[] }).texts[0]).toContain('며칠');
+    expect((JSON.parse(reopened.getHeaderFooterParaInfo(2, true, 0, 0)) as { text: string }).text).toBe('셋째 구역 머리말 오랜만');
+  });
 
   // 편집기를 표 칸으로 이동시키는 데 걸리는 시간은 가장 바깥 표의 크기에 달려 있다. 실제 편집기(브라우저)에서 재어 보니
   // 이 문서만(가장 바깥 표 하나에 문단 1,588개) 선택하면 13초, 캐럿만 옮겨도 칸에 따라 8초가 걸렸고, 나머지 문서는 표마다 3~22ms 였다. 그 기준이 문서마다 맞게 적용되는지 본다.

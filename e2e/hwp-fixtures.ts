@@ -194,3 +194,73 @@ export function makeHwpWithBigTable(rows = 260): Upload {
   for (let r = 0; r < rows; r++) d.insertTextInCell(0, t.paraIdx, t.controlIdx, r, 0, 0, r === 149 ? '150번째 줄 몇일 뒤' : `${r + 1}번째 줄`);
   return { name: 'big-table.hwp', mimeType: 'application/octet-stream', buffer: Buffer.from(d.exportHwp()) };
 }
+
+/**
+ * 시험용 한글 문서(머리말·꼬리말·각주 포함): 본문 두 줄, 머리말, 꼬리말, 둘째 줄에 단 각주.
+ * 오탈자가 머리말("오랫만"), 본문("몇일"), 각주("되요"), 꼬리말("할려고")에 하나씩 있어서 데모 AI 가 4가지를 제안한다.
+ */
+export const AREA_SAMPLE = {
+  body: ['휴가 신청서', '몇일 동안 쉬겠습니다.'],
+  header: '머리말 오랫만 입니다',
+  footer: '꼬리말 할려고 합니다',
+  note: '각주 되요 입니다',
+  /** 오탈자를 모두 고친 뒤의 모습 */
+  fixed: { body: ['휴가 신청서', '며칠 동안 쉬겠습니다.'], header: '머리말 오랜만 입니다', footer: '꼬리말 하려고 합니다', note: '각주 돼요 입니다' },
+};
+
+/**
+ * headerSize 가 있으면 머리말 글자 크기(pt)를 그것으로 해서, 본문과 서식이 다른 머리말을 흉내 낸다.
+ * extraBody 가 있으면 본문 끝에 그만큼 보통 문단을 더한다(서식 점검이 본문 문단 수를 보고 판단하기 때문).
+ */
+export function makeHwpWithAreas(format: 'hwp' | 'hwpx' = 'hwp', name = `areas.${format}`, opts: { headerSize?: number; extraBody?: number } = {}): Upload {
+  const Doc = core();
+  const d = Doc.createEmpty();
+  d.createBlankDocument();
+  const lines = [...AREA_SAMPLE.body, ...Array.from({ length: opts.extraBody ?? 0 }, (_, i) => `본문 ${i + 1}번째 문장입니다.`)];
+  lines.forEach((line, i) => {
+    d.insertText(0, i, 0, line);
+    if (i < lines.length - 1) d.splitParagraph(0, i, d.getParagraphLength(0, i));
+  });
+  d.createHeaderFooter(0, true, 0);
+  d.insertTextInHeaderFooter(0, true, 0, 0, 0, AREA_SAMPLE.header);
+  if (opts.headerSize) d.applyCharFormatInHeaderFooter(0, true, 0, 0, 0, 0, [...AREA_SAMPLE.header].length, JSON.stringify({ fontSize: opts.headerSize * 100, bold: true }));
+  d.createHeaderFooter(0, false, 0);
+  d.insertTextInHeaderFooter(0, false, 0, 0, 0, AREA_SAMPLE.footer);
+  const note = JSON.parse(d.insertFootnote(0, 1, 2)) as { paraIdx: number; controlIdx: number };
+  d.insertTextInFootnote(0, note.paraIdx, note.controlIdx, 0, 2, AREA_SAMPLE.note);
+  const bytes = format === 'hwpx' ? d.exportHwpx() : d.exportHwp();
+  return { name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) };
+}
+
+export interface AreaRead {
+  headers: string[];
+  /** 머리말 문단마다 첫 글자의 글자 크기(pt) */
+  headerSizes: number[];
+  footers: string[];
+  /** 각주·미주 글(맨 앞 번호 자리는 뺀다) */
+  notes: string[];
+}
+
+/** 파일(바이트)을 열어 머리말·꼬리말·각주의 글을 읽는다. 앱 코드와 따로 만든 읽기라서 결과를 독립적으로 확인할 수 있다. */
+export function readHwpAreas(bytes: Buffer | Uint8Array): AreaRead {
+  const Doc = core();
+  const d = new Doc(new Uint8Array(bytes));
+  const out: AreaRead = { headers: [], headerSizes: [], footers: [], notes: [] };
+  const list = (JSON.parse(d.getHeaderFooterList(0, true, 0)) as { items?: Array<{ sectionIdx: number; isHeader: boolean; applyTo: number }> }).items ?? [];
+  for (const it of list) {
+    const info = JSON.parse(d.getHeaderFooter(it.sectionIdx, it.isHeader, it.applyTo)) as { paraCount?: number };
+    for (let q = 0; q < (info.paraCount ?? 0); q++) {
+      const para = JSON.parse(d.getHeaderFooterParaInfo(it.sectionIdx, it.isHeader, it.applyTo, q)) as { text?: string };
+      if (!para.text) continue;
+      (it.isHeader ? out.headers : out.footers).push(para.text);
+      if (it.isHeader) out.headerSizes.push((JSON.parse(d.getCharPropertiesInHeaderFooter(it.sectionIdx, true, it.applyTo, q, 0)) as { fontSize: number }).fontSize / 100);
+    }
+  }
+  // 각주·미주: 컨트롤 목록의 문단 번호는 구역을 이어 붙인 번호다(시험 문서는 구역이 하나다).
+  for (const c of JSON.parse(d.getControls()) as Array<{ ctrlId: string; list: number; para: number; controlIndex: number }>) {
+    if ((c.ctrlId !== 'fn' && c.ctrlId !== 'en') || c.list !== 0) continue;
+    const info = JSON.parse(d.getFootnoteInfo(0, c.para, c.controlIndex)) as { texts?: string[] };
+    for (const [q, t] of (info.texts ?? []).entries()) if (t.trim()) out.notes.push(q === 0 ? t.slice(1).trim() : t);
+  }
+  return out;
+}

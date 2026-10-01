@@ -25,10 +25,18 @@ function josaOf(word: string, kind: 'eunNeun' | 'euro' | 'iGa' | 'eulReul'): str
 }
 
 /**
- * 서식 규칙은 표 칸 안의 문단에는 적용하지 않는다(실제 AI 에게도 같은 원칙을 프롬프트로 알린다). 맞춤법은 표 안에도 적용한다.
- * 다만 규칙에 "표"가 적혀 있으면 사용자가 표를 언급한 것이므로 표 칸도 포함한다(프롬프트의 원칙과 같다).
+ * 서식 규칙은 표 칸·머리말·꼬리말·각주·미주 안의 문단에는 적용하지 않는다(실제 AI 에게도 같은 원칙을 프롬프트로 알린다). 맞춤법은 그곳에도 적용한다.
+ * 다만 규칙에 그곳의 이름("표", "머리말", "꼬리말", "각주", "미주")이 적혀 있으면 사용자가 언급한 것이므로 그곳도 포함한다(프롬프트의 원칙과 같다).
  */
-const formatTargets = (doc: DocSummary, rules: string) => (rules.includes('표') ? doc.paragraphs : doc.paragraphs.filter((p) => !p.cell));
+const formatTargets = (doc: DocSummary, rules: string) =>
+  doc.paragraphs.filter((p) => {
+    if (p.cell) return rules.includes('표');
+    if (p.area) {
+      const names: Record<string, string[]> = { header: ['머리말'], footer: ['꼬리말'], footnote: ['각주'], endnote: ['미주', '각주'] };
+      return (names[p.area.kind] ?? []).some((n) => rules.includes(n));
+    }
+    return true;
+  });
 
 const blankOp: RawOp = {
   type: 'replaceText',

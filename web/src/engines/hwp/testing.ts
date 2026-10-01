@@ -110,3 +110,84 @@ export function openTableSample(spec: TableSampleSpec, format: HwpFormat = 'hwp'
   const doc = new Doc(new Uint8Array(bytes));
   return { doc, model: new HwpModel(doc, format), host: outer.paraIdx };
 }
+
+/** 시험용 문서에 만들 머리말·꼬리말 하나 */
+export interface HeaderFooterSpec {
+  /** 적용 쪽: 0 양쪽(기본), 1 짝수 쪽, 2 홀수 쪽 */
+  applyTo?: 0 | 1 | 2;
+  /** 문단마다 한 줄 */
+  lines: string[];
+  /** 글자 서식을 줄 범위(첫 문단 안의 글자 위치 [start, end)) */
+  format?: Array<{ start: number; end: number; props: Record<string, unknown> }>;
+}
+
+/** 시험용 문서에 만들 각주·미주 하나 */
+export interface NoteSpec {
+  kind?: 'footnote' | 'endnote';
+  /** 이것을 달 본문 문단 번호와, 그 문단 안 글자 위치 */
+  para: number;
+  at: number;
+  /** 각주 안 문단마다 한 줄(번호 자리 뒤에 이어 쓴다) */
+  lines: string[];
+}
+
+export interface AreaSampleSpec {
+  /** 본문 줄들(줄마다 한 문단) */
+  body: string[];
+  headers?: HeaderFooterSpec[];
+  footers?: HeaderFooterSpec[];
+  notes?: NoteSpec[];
+}
+
+/**
+ * 본문 줄에 머리말·꼬리말·각주·미주를 단 문서를 만들어 파일로 내보낸 뒤 다시 연다(실제 파일을 여는 것과 같은 경로).
+ * 각주는 뒤쪽 것부터 달아서, 같은 문단에 여럿을 달아도 앞에서 단 각주의 컨트롤 번호가 밀리지 않게 한다.
+ */
+export function openAreaSample(
+  spec: AreaSampleSpec,
+  format: HwpFormat = 'hwp',
+  tweak?: (doc: HwpDocument) => void,
+  options: { reopen?: boolean } = {},
+): { doc: HwpDocument; model: HwpModel } {
+  const Doc = loadNodeCore();
+  const built = Doc.createEmpty();
+  built.createBlankDocument();
+  spec.body.forEach((line, i) => {
+    if (line) built.insertText(0, i, 0, line);
+    if (i < spec.body.length - 1) built.splitParagraph(0, i, built.getParagraphLength(0, i));
+  });
+
+  const area = (isHeader: boolean, hf: HeaderFooterSpec): void => {
+    const applyTo = hf.applyTo ?? 0;
+    built.createHeaderFooter(0, isHeader, applyTo);
+    hf.lines.forEach((line, q) => {
+      if (line) built.insertTextInHeaderFooter(0, isHeader, applyTo, q, 0, line);
+      if (q < hf.lines.length - 1) built.splitParagraphInHeaderFooter(0, isHeader, applyTo, q, [...line].length);
+    });
+    for (const f of hf.format ?? []) built.applyCharFormatInHeaderFooter(0, isHeader, applyTo, 0, f.start, 0, f.end, JSON.stringify(f.props));
+  };
+  (spec.headers ?? []).forEach((h) => area(true, h));
+  (spec.footers ?? []).forEach((f) => area(false, f));
+
+  const notes = [...(spec.notes ?? [])].sort((a, b) => b.para - a.para || b.at - a.at);
+  for (const n of notes) {
+    const made = JSON.parse(n.kind === 'endnote' ? built.insertEndnote(0, n.para, n.at) : built.insertFootnote(0, n.para, n.at)) as { paraIdx: number; controlIdx: number };
+    // 첫 문단은 번호 자리(2글자) 뒤에 모든 줄을 이어 쓴 뒤, 줄 경계에서 뒤쪽부터 쪼갠다.
+    // 코어의 각주 문단 쪼개기는 번호 자리 때문에 위치가 한 글자 앞으로 쏠려서 +1 로 맞춘다. 맞게 쪼개졌는지 아래에서 확인한다.
+    built.insertTextInFootnote(0, made.paraIdx, made.controlIdx, 0, 2, n.lines.join(''));
+    let boundary = 2 + [...n.lines.join('')].length;
+    for (let q = n.lines.length - 1; q >= 1; q--) {
+      boundary -= [...(n.lines[q] as string)].length;
+      built.splitParagraphInFootnote(0, made.paraIdx, made.controlIdx, 0, boundary + 1);
+    }
+    const got = (JSON.parse(built.getFootnoteInfo(0, made.paraIdx, made.controlIdx)) as { texts: string[] }).texts.map((t, q) => (q === 0 ? t.slice(2) : t));
+    if (JSON.stringify(got) !== JSON.stringify(n.lines)) throw new Error(`시험 문서의 각주를 줄 단위로 만들지 못했어요: ${JSON.stringify(got)}`);
+  }
+
+  tweak?.(built);
+  // reopen: false 면 내보내지 않고 만든 문서를 그대로 쓴다(내보내기 때 사라지는 시험용 표시 문자를 시험할 때).
+  if (options.reopen === false) return { doc: built, model: new HwpModel(built, format) };
+  const bytes = format === 'hwpx' ? built.exportHwpx() : built.exportHwp();
+  const doc = new Doc(new Uint8Array(bytes));
+  return { doc, model: new HwpModel(doc, format) };
+}

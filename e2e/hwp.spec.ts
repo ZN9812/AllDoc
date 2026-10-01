@@ -161,13 +161,13 @@ test.describe('한글(HWP·HWPX) 문서', () => {
     await expect.poll(scrollTop, { timeout: 15_000 }).toBeGreaterThan(5000);
   });
 
-  test('AI·서식 점검이 다루는 범위의 한계(머리말·각주·글상자 등)를 서식 점검 탭에서 알려 준다', async ({ page }) => {
+  test('AI·서식 점검이 다루는 범위의 한계(글상자·표 안의 각주 등)를 서식 점검 탭에서 알려 준다', async ({ page }) => {
     await openFile(page, makeHwp('hwp'));
     await page.getByRole('tab', { name: /서식 점검/ }).click();
     const note = page.getByTestId('coverage-note');
-    await expect(note).toContainText('본문과 표 안의 글을 다뤄요');
-    await expect(note).toContainText('머리말·꼬리말, 각주, 글상자 안의 글은 AI가 읽지 못해요');
-    await expect(note).toContainText('서식 점검(문서 안 일관성·기준 문서)은 표 밖 본문만 비교');
+    await expect(note).toContainText('본문, 표 안의 글, 머리말·꼬리말, 각주·미주를 다뤄요');
+    await expect(note).toContainText('글상자 안의 글과 표 안에 달린 각주는 AI가 읽지 못해요');
+    await expect(note).toContainText('서식 점검(문서 안 일관성·기준 문서)은 본문(표 밖)만 비교');
   });
 
   test('깨진 한글 파일은 알아듣기 쉬운 안내를 보여 준다', async ({ page }) => {
