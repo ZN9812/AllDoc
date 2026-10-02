@@ -33,6 +33,16 @@ describe('본문 밖 영역(머리말·꼬리말·각주·미주) 위치', () =>
     expect(areaName({ kind: 'footnote', number: 3 })).toBe('각주');
   });
 
+  it('캡션 위치는 "그림 캡션 N"과 "표 N 캡션"으로 쓴다(표 번호는 표 칸의 위치 문구와 같다)', () => {
+    expect(areaLabel({ kind: 'caption', of: 'picture', number: 1 })).toBe('그림 캡션 1');
+    expect(areaLabel({ kind: 'caption', of: 'table', number: 2 })).toBe('표 2 캡션');
+    expect(areaLabel({ kind: 'caption', of: 'table' })).toBe('표 캡션');
+    expect(areaName({ kind: 'caption', of: 'table', number: 2 })).toBe('캡션');
+    const base = { index: 0, text: '글', char: {}, para: {} };
+    expect(ParagraphInfoSchema.parse({ ...base, area: { kind: 'caption', of: 'table', number: 2 } }).area).toEqual({ kind: 'caption', of: 'table', number: 2 }); // 서버가 검증해도 of 가 지워지지 않는다
+    expect(ParagraphInfoSchema.safeParse({ ...base, area: { kind: 'caption', of: 'chart', number: 2 } }).success).toBe(false);
+  });
+
   it('문단 정보의 area 는 없어도 되고, 있으면 규칙을 지키며, 서버가 검증해도 지워지지 않는다', () => {
     const base = { index: 0, text: '글', char: {}, para: {} };
     expect(ParagraphInfoSchema.safeParse({ ...base, area: { kind: 'footnote', number: 2 } }).success).toBe(true);

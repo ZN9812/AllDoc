@@ -41,11 +41,14 @@ describe.skipIf(files.length === 0 && !REQUIRED)('실제 한글 문서(예제 �
 
   // 코어를 직접 걸으며(모델과 따로 만든 코드로) 표와 글상자를 센다. 코어의 컨트롤 목록(getControls)은 쓰지 않는다:
   // 구역이 둘 이상인 문서에서는 둘째 구역부터의 표 칸·글상자 안 컨트롤이 그 목록에서 빠진다(실제 예제 문서에서 확인했다).
-  // 글 캡션이 달린 그림도 경로 함수로는 글상자처럼 문단이 읽히므로, 개체의 갈래를 복사 함수가 알려 주는 이름("[도형]")으로 가려 센다.
+  // 글 캡션이 달린 그림도 경로 함수로는 글상자처럼 문단이 읽히므로, 개체의 갈래를 복사 함수가 알려 주는 이름("[도형]", "[그림]")으로 가려 센다.
   // boxTexts 는 글상자 안 문단의 글을 문서 순서대로 모은 것이다. 글상자 안에 놓인 표의 칸 문단도 글상자의 글로 센다(모델이 그렇게 담는다).
-  const walkCore = (doc: InstanceType<ReturnType<typeof loadNodeCore>>): { tables: number; boxes: number; bodyBoxes: number; boxTexts: string[] } => {
+  // captionTexts 는 캡션 문단의 글(코어가 주는 그대로)이다: 글 캡션이 달린 그림(어느 깊이든)과 본문 문단에 바로 놓인 표(칸 번호 65534)의 것.
+  const walkCore = (
+    doc: InstanceType<ReturnType<typeof loadNodeCore>>,
+  ): { tables: number; boxes: number; bodyBoxes: number; boxTexts: string[]; pictureCaptions: number; tableCaptions: number; captionTexts: string[] } => {
     type Step = { controlIndex: number; cellIndex: number; cellParaIndex: number };
-    const count = { tables: 0, boxes: 0, bodyBoxes: 0, boxTexts: [] as string[] };
+    const count = { tables: 0, boxes: 0, bodyBoxes: 0, boxTexts: [] as string[], pictureCaptions: 0, tableCaptions: 0, captionTexts: [] as string[] };
     const J = (path: Step[]): string => JSON.stringify(path);
     const textAt = (sec: number, host: number, path: Step[]): string => {
       const len = doc.getCellParagraphLengthByPath(sec, host, J(path));
@@ -61,6 +64,19 @@ describe.skipIf(files.length === 0 && !REQUIRED)('실제 한글 문서(예제 �
       }
       if (dim) {
         count.tables++;
+        if (para.length === 0) {
+          let n = 0;
+          try {
+            n = doc.getCellParagraphCount(sec, host, j, 65534);
+          } catch {
+            n = 0; // 캡션이 없는 표
+          }
+          if (n > 0) count.tableCaptions++;
+          for (let q = 0; q < n; q++) {
+            const len = doc.getCellParagraphLength(sec, host, j, 65534, q);
+            count.captionTexts.push(len > 0 ? doc.getTextInCell(sec, host, j, 65534, q, 0, len) : '');
+          }
+        }
         for (let k = 0; k < dim.cellCount; k++) {
           const n = doc.getCellParagraphCountByPath(sec, host, J([...para, { controlIndex: j, cellIndex: k, cellParaIndex: 0 }]));
           for (let q = 0; q < n; q++) {
@@ -77,7 +93,13 @@ describe.skipIf(files.length === 0 && !REQUIRED)('실제 한글 문서(예제 �
       } catch {
         return;
       }
-      if ((JSON.parse(doc.copyControl(sec, host, para.length === 0 ? '' : J(para), j)) as { text?: string }).text !== '[도형]') return;
+      const label = (JSON.parse(doc.copyControl(sec, host, para.length === 0 ? '' : J(para), j)) as { text?: string }).text;
+      if (label === '[그림]') {
+        count.pictureCaptions++;
+        for (let q = 0; q < n; q++) count.captionTexts.push(textAt(sec, host, [...para, { controlIndex: j, cellIndex: 0, cellParaIndex: q }]));
+        return;
+      }
+      if (label !== '[도형]') return;
       count.boxes++;
       if (para.length === 0) count.bodyBoxes++;
       for (let q = 0; q < n; q++) {
@@ -112,6 +134,22 @@ describe.skipIf(files.length === 0 && !REQUIRED)('실제 한글 문서(예제 �
     const walked = walkCore(new Doc(bytes));
     expect({ tables: st.tables, boxes: st.boxes, bodyBoxes: st.bodyBoxes }).toEqual({ tables: walked.tables, boxes: walked.boxes, bodyBoxes: walked.bodyBoxes });
     expect(model.summarize().paragraphs.filter((p) => p.area?.kind === 'textbox').map((p) => p.text)).toEqual(walked.boxTexts.filter((t) => t.trim() !== ''));
+  });
+
+  // 캡션: 그림 캡션과 표 캡션을 빠짐없이 찾고 글이 코어의 글과 같다(번호 자리 표지만 공백 한 글자로 되돌려 견준다. 순서는 표 캡션이 표 위냐 아래냐에 따라 달라서 정렬해 견준다).
+  it.each(files)('%s: 그림·표 캡션을 빠짐없이 찾고 글을 그대로 읽는다(코어를 직접 걸으며 읽은 것과 같다)', (name) => {
+    const { Doc, bytes, kind } = open(name);
+    const model = new HwpModel(new Doc(bytes), kind);
+    const st = model.describeStructure();
+    const walked = walkCore(new Doc(bytes));
+    expect({ pictureCaptions: st.pictureCaptions, tableCaptions: st.tableCaptions }).toEqual({ pictureCaptions: walked.pictureCaptions, tableCaptions: walked.tableCaptions });
+    const plain = (t: string): string => t.replaceAll('№', ' ');
+    const read = model.summarize().paragraphs.filter((p) => p.area?.kind === 'caption');
+    expect(read.map((p) => plain(p.text)).sort()).toEqual(walked.captionTexts.filter((t) => t.trim() !== '').map(plain).sort());
+    // 위치: 번호는 문서 순서로 1부터 이어지고, 그림 캡션과 표 캡션의 갈래가 붙는다.
+    for (const p of read) expect(p.area?.of === 'picture' || p.area?.of === 'table').toBe(true);
+    const picNumbers = [...new Set(read.filter((p) => p.area?.of === 'picture').map((p) => p.area?.number))];
+    expect(picNumbers).toEqual([...picNumbers].sort((a, b) => (a as number) - (b as number)));
   });
 
   // 글상자가 있는 예제 문서: 글상자 개수를 문서에서 직접 확인한 값과 맞춘다.

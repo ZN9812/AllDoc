@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { HwpDocument, initSync } from '@rhwp/core';
 import { HwpModel } from '../web/src/engines/hwp/model';
-import { buildBoxSample } from '../web/src/engines/hwp/testing';
+import { buildBoxSample, buildCaptionSample, TABLE_CAPTION_CELL } from '../web/src/engines/hwp/testing';
 import type { Upload } from './helpers';
 
 let ready = false;
@@ -397,4 +397,98 @@ export function makeHwpWithNestedBoxes(format: 'hwp' | 'hwpx' = 'hwp', name = `n
     format,
   );
   return { name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) };
+}
+
+/**
+ * 시험용 한글 캡션 문서. 본문 둘째 문단에 글 캡션이 달린 그림, 셋째 문단에 글 캡션이 달린 표(2칸)를 놓는다.
+ * 오탈자가 그림 캡션("할려고")·표 캡션("되요")·본문("몇일")에 하나씩 있어서 데모 AI 가 3가지를 제안한다.
+ * 캡션 글은 실제 문서처럼 "라벨 + 공백 + 번호 + 공백 + 글"이다(번호는 문서가 매기는 자동 번호라 글에 나오지 않는다).
+ */
+export const CAPTION_SAMPLE = {
+  body: ['실적 보고서', '', '', '몇일 동안의 결과입니다.'],
+  pictureText: '시스템 구성도 할려고 합니다',
+  cells: ['구분', '실적'],
+  tableText: '월별 실적 되요 라고 적습니다',
+  /** 오탈자를 모두 고친 뒤의 모습 */
+  fixed: { body: '며칠 동안의 결과입니다.', pictureText: '시스템 구성도 하려고 합니다', tableText: '월별 실적 돼요 라고 적습니다' },
+};
+
+/**
+ * captionSize 가 있으면 캡션 글을 그 크기(pt)의 굵은 글씨로 한다(본문과 서식이 다른 캡션을 흉내 낸다).
+ * extraBody 가 있으면 본문 끝에 그만큼 보통 문단을 더한다(서식 점검이 본문 문단 수를 보고 판단하기 때문).
+ */
+export function makeHwpWithCaptions(format: 'hwp' | 'hwpx' = 'hwp', name = `captions.${format}`, opts: { captionSize?: number; extraBody?: number } = {}): Upload {
+  const body = [...CAPTION_SAMPLE.body, ...Array.from({ length: opts.extraBody ?? 0 }, (_, i) => `본문 ${i + 1}번째 문장입니다.`)];
+  const { bytes } = buildCaptionSample(
+    { body, pictures: [{ para: 1, caption: CAPTION_SAMPLE.pictureText }], tables: [{ para: 2, cells: [CAPTION_SAMPLE.cells], caption: CAPTION_SAMPLE.tableText }] },
+    format,
+    (doc, placed) => {
+      if (!opts.captionSize) return;
+      const props = JSON.stringify({ fontSize: opts.captionSize * 100, bold: true });
+      const pic = placed.pictures[0] as { para: number; control: number };
+      const tbl = placed.tables[0] as { para: number; control: number };
+      const path = JSON.stringify([{ controlIndex: pic.control, cellIndex: 0, cellParaIndex: 0 }]);
+      doc.applyCharFormatInCellByPath(0, pic.para, path, 0, doc.getCellParagraphLengthByPath(0, pic.para, path), props);
+      doc.applyCharFormatInCell(0, tbl.para, tbl.control, TABLE_CAPTION_CELL, 0, 0, doc.getCellParagraphLength(0, tbl.para, tbl.control, TABLE_CAPTION_CELL, 0), props);
+    },
+  );
+  return { name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) };
+}
+
+export interface CaptionRead {
+  kind: 'picture' | 'table';
+  /** 코어가 주는 캡션 글 그대로(번호 자리는 공백 한 글자로 들어 있다) */
+  text: string;
+  /** 캡션 첫 글자의 글자 크기(pt) */
+  sizePt: number;
+}
+
+/**
+ * 파일(바이트)을 열어 본문 문단에 놓인 그림 캡션과 표 캡션을 문서 순서로 읽는다. 앱 코드와 따로 만든 읽기라서 결과를 독립적으로 확인할 수 있다.
+ * 표 캡션은 칸 번호 65534 로, 그림 캡션은 경로 함수로 읽는다(글 캡션이 달리지 않은 그림은 경로 함수가 거절하고, 도형은 개체 갈래 이름으로 걸러 낸다).
+ */
+export function readHwpCaptions(bytes: Buffer | Uint8Array): CaptionRead[] {
+  const d = core2(bytes);
+  const out: CaptionRead[] = [];
+  for (let s = 0; s < d.getSectionCount(); s++) {
+    for (let p = 0; p < d.getParagraphCount(s); p++) {
+      const positions = JSON.parse(d.getControlTextPositions(s, p)) as unknown[];
+      for (let c = 0; c < positions.length; c++) {
+        let isTable = true;
+        try {
+          d.getTableDimensions(s, p, c);
+        } catch {
+          isTable = false;
+        }
+        if (isTable) {
+          let n = 0;
+          try {
+            n = d.getCellParagraphCount(s, p, c, TABLE_CAPTION_CELL);
+          } catch {
+            n = 0; // 캡션이 없는 표
+          }
+          for (let q = 0; q < n; q++) {
+            const len = d.getCellParagraphLength(s, p, c, TABLE_CAPTION_CELL, q);
+            const size = (JSON.parse(d.getCellCharPropertiesAt(s, p, c, TABLE_CAPTION_CELL, q, 0)) as { fontSize: number }).fontSize;
+            out.push({ kind: 'table', text: len > 0 ? d.getTextInCell(s, p, c, TABLE_CAPTION_CELL, q, 0, len) : '', sizePt: size / 100 });
+          }
+          continue;
+        }
+        let n: number;
+        try {
+          n = d.getCellParagraphCountByPath(s, p, JSON.stringify([{ controlIndex: c, cellIndex: 0, cellParaIndex: 0 }]));
+        } catch {
+          continue; // 글상자도 표도 아닌 컨트롤
+        }
+        if ((JSON.parse(d.copyControl(s, p, '', c)) as { text?: string }).text !== '[그림]') continue;
+        for (let q = 0; q < n; q++) {
+          const path = JSON.stringify([{ controlIndex: c, cellIndex: 0, cellParaIndex: q }]);
+          const len = d.getCellParagraphLengthByPath(s, p, path);
+          const size = (JSON.parse(d.getCellCharPropertiesAtByPath(s, p, path, 0)) as { fontSize: number }).fontSize;
+          out.push({ kind: 'picture', text: len > 0 ? d.getTextInCellByPath(s, p, path, 0, len) : '', sizePt: size / 100 });
+        }
+      }
+    }
+  }
+  return out;
 }

@@ -100,8 +100,8 @@ describe('글상자 안의 글 읽기', () => {
   });
 
   // 글 캡션이 달린 그림은 코어의 경로 함수로는 글상자처럼 문단이 읽힌다(캡션 문단). 실제 예제 문서에서 이런 그림이 글상자로 잘못 세어졌었다.
-  // 캡션의 "그림 1" 같은 글은 글상자 안의 글이 아니라서 읽지 않는다(캡션을 고치는 것은 이 시험이 다루지 않는다).
-  it.each(FORMATS)('%s: 글 캡션이 달린 그림은 글상자가 아니다(본문의 그림과 표 칸 안의 그림 모두)', (format) => {
+  // 그래서 글상자로 세지 않고 그림 캡션으로 읽는다(캡션 글을 읽고 고치는 것은 caption.test.ts 가 다룬다).
+  it.each(FORMATS)('%s: 글 캡션이 달린 그림은 글상자가 아니라 그림 캡션이다(본문의 그림과 표 칸 안의 그림 모두)', (format) => {
     const Doc = loadNodeCore();
     const built = Doc.createEmpty();
     built.createBlankDocument();
@@ -122,14 +122,18 @@ describe('글상자 안의 글 읽기', () => {
 
     const bytes = new Uint8Array(format === 'hwp' ? built.exportHwp() : built.exportHwpx());
     const model = new HwpModel(new Doc(bytes), format);
-    expect(model.describeStructure()).toMatchObject({ tables: 1, boxes: 0, bodyBoxes: 0, boxParagraphs: 0 });
+    expect(model.describeStructure()).toMatchObject({ tables: 1, boxes: 0, bodyBoxes: 0, boxParagraphs: 0, pictureCaptions: 2, captionParagraphs: 2 });
     const s = model.summarize();
     expect(s.paragraphs.some((p) => p.area?.kind === 'textbox')).toBe(false);
-    expect(texts(s)).toEqual(['그림 위 문단', '칸 안 문단']);
+    expect(s.paragraphs.filter((p) => p.area?.kind === 'caption').map((p) => p.area)).toEqual([
+      { kind: 'caption', of: 'picture', number: 1 },
+      { kind: 'caption', of: 'picture', number: 2 },
+    ]);
+    expect(texts(s)).toEqual(['그림 위 문단', '그림 №', '칸 안 문단', '그림 №']);
   });
 
-  // 표에도 글 캡션이 붙을 수 있다. 캡션 문단은 표 칸이 아니라서 읽지 않고, 표 칸의 글은 그대로 읽는다.
-  it.each(FORMATS)('%s: 글 캡션이 달린 표는 캡션을 읽지 않고 표 칸의 글만 읽는다', (format) => {
+  // 표에도 글 캡션이 붙을 수 있다. 캡션 문단은 표 칸이 아니라서 칸으로 세지 않고 표 캡션으로 읽는다.
+  it.each(FORMATS)('%s: 글 캡션이 달린 표는 표 칸의 글과 별개로 표 캡션을 읽는다(글상자가 아니다)', (format) => {
     const Doc = loadNodeCore();
     const built = Doc.createEmpty();
     built.createBlankDocument();
@@ -141,8 +145,8 @@ describe('글상자 안의 글 읽기', () => {
     expect(JSON.parse(built.getTableProperties(0, table.paraIdx, table.controlIdx))).toMatchObject({ hasCaption: true }); // 시험 전제
     const bytes = new Uint8Array(format === 'hwp' ? built.exportHwp() : built.exportHwpx());
     const model = new HwpModel(new Doc(bytes), format);
-    expect(model.describeStructure()).toMatchObject({ tables: 1, cellParagraphs: 1, boxes: 0, boxParagraphs: 0 });
-    expect(texts(model.summarize())).toEqual(['표 위 문단', '칸 안 문단']);
+    expect(model.describeStructure()).toMatchObject({ tables: 1, cellParagraphs: 1, boxes: 0, boxParagraphs: 0, tableCaptions: 1, captionParagraphs: 1 });
+    expect(texts(model.summarize())).toEqual(['표 위 문단', '칸 안 문단', '표 №']);
   });
 });
 

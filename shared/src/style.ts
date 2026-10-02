@@ -46,28 +46,38 @@ export type CellPlace = z.infer<typeof CellPlaceSchema>;
 /** 사람에게 보여 줄 위치 문구. 예: "표 2 · 3행 1열" */
 export const placeLabel = (c: CellPlace): string => `표 ${c.table} · ${c.row}행 ${c.col}열${c.depth > 1 ? ' (표 안의 표)' : ''}`;
 
-/** 본문 밖의 글(머리말·꼬리말·각주·미주·글상자) 문단이 어디에 있는지. 본문과 표 칸의 문단에는 없다. */
+/** 본문 밖의 글(머리말·꼬리말·각주·미주·글상자·캡션) 문단이 어디에 있는지. 본문과 표 칸의 문단에는 없다. */
 export const AreaPlaceSchema = z.object({
-  kind: z.enum(['header', 'footer', 'footnote', 'endnote', 'textbox']),
+  kind: z.enum(['header', 'footer', 'footnote', 'endnote', 'textbox', 'caption']),
   /** 머리말·꼬리말이 적용되는 쪽(양쪽·짝수 쪽·홀수 쪽·첫 쪽만) */
   pages: z.enum(['both', 'even', 'odd', 'first']).optional(),
-  /** 각주·미주·글상자 번호(1부터, 문서에 나오는 순서) */
+  /**
+   * 각주·미주·글상자 번호(1부터, 문서에 나오는 순서).
+   * 캡션이면 그림 캡션은 "캡션이 달린 그림"의 번호(문서 순서), 표 캡션은 그 표의 번호(표 칸 위치 문구의 표 번호와 같다).
+   */
   number: z.number().int().min(1).optional(),
+  /** 캡션이 달린 개체의 갈래(kind 가 caption 일 때만) */
+  of: z.enum(['picture', 'table']).optional(),
   /** 구역 번호(1부터). 구역이 둘 이상인 문서에서만 붙는다. */
   section: z.number().int().min(1).optional(),
 });
 export type AreaPlace = z.infer<typeof AreaPlaceSchema>;
 
-const AREA_NAME: Record<AreaPlace['kind'], string> = { header: '머리말', footer: '꼬리말', footnote: '각주', endnote: '미주', textbox: '글상자' };
+const AREA_NAME: Record<AreaPlace['kind'], string> = { header: '머리말', footer: '꼬리말', footnote: '각주', endnote: '미주', textbox: '글상자', caption: '캡션' };
 const PAGES_NAME: Record<NonNullable<AreaPlace['pages']>, string> = { both: '', even: '짝수 쪽', odd: '홀수 쪽', first: '첫 쪽' };
 
 /** 영역의 이름만(번호·쪽 없이). 예: "각주" */
 export const areaName = (a: AreaPlace): string => AREA_NAME[a.kind];
 
-/** 사람에게 보여 줄 위치 문구. 예: "머리말", "꼬리말(홀수 쪽)", "각주 3", "글상자 2", "머리말 · 구역 2" */
+/**
+ * 사람에게 보여 줄 위치 문구. 예: "머리말", "꼬리말(홀수 쪽)", "각주 3", "글상자 2", "머리말 · 구역 2",
+ * 캡션은 표 번호가 앞에 오는 "표 2 캡션"(표 칸의 "표 2 · 3행 1열"과 같은 번호)과 "그림 캡션 1"
+ */
 export function areaLabel(a: AreaPlace): string {
   const pages = a.pages ? PAGES_NAME[a.pages] : '';
-  const head = `${AREA_NAME[a.kind]}${a.number !== undefined ? ` ${a.number}` : ''}${pages ? `(${pages})` : ''}`;
+  const num = a.number !== undefined ? ` ${a.number}` : '';
+  const name = a.kind === 'caption' && a.of === 'table' ? `표${num} 캡션` : a.kind === 'caption' ? `그림 캡션${num}` : `${AREA_NAME[a.kind]}${num}`;
+  const head = `${name}${pages ? `(${pages})` : ''}`;
   return a.section !== undefined ? `${head} · 구역 ${a.section}` : head;
 }
 

@@ -74,6 +74,24 @@ describe('제안의 머리말·꼬리말·각주 위치 문구', () => {
   });
 });
 
+describe('제안의 캡션 위치 문구', () => {
+  const places = new Map<number, CellPlace | AreaPlace>([
+    [3, cellAt(1, 1, 1)],
+    [4, { kind: 'caption', of: 'table', number: 1 }],
+    [5, { kind: 'caption', of: 'table', number: 2 }],
+    [6, { kind: 'caption', of: 'picture', number: 1 }],
+  ]);
+
+  it('한 곳이면 "표 1 캡션"·"그림 캡션 1", 여러 곳이면 캡션 곳 수를 쓴다', () => {
+    expect(placeOfParagraphs([4], places)).toBe('표 1 캡션');
+    expect(placeOfParagraphs([6], places)).toBe('그림 캡션 1');
+    expect(placeOfParagraphs([4, 5], places)).toBe('캡션 2곳');
+    expect(placeOfParagraphs([4, 6], places)).toBe('캡션 2곳');
+    expect(placeOfParagraphs([0, 4, 6], places)).toBe('캡션 2곳 포함');
+    expect(placeOfParagraphs([3, 4], places)).toBe('표·캡션 2곳');
+  });
+});
+
 describe('제안에 위치 붙이기', () => {
   const summary: DocSummary = {
     kind: 'hwp',

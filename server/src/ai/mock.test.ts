@@ -125,4 +125,20 @@ describe('데모 AI와 머리말·꼬리말·각주 안의 글', () => {
     const named = await mock.propose({ request: req({ mode: 'format_check', criteria: 'rules', rulesText: '글상자도 10pt', document: withBox }) });
     for (const p of named.proposals) expect(p.ops.map((o) => o.paragraph)).toEqual([0, 1]);
   });
+
+  it('캡션 안의 글도 맞춤법은 적용하고, 서식 규칙은 "캡션"이 적혀 있을 때만 포함한다(번호 자리 표지는 건드리지 않는다)', async () => {
+    const withCaption = {
+      kind: 'hwp' as const,
+      paragraphs: [
+        { index: 0, text: '본문 몇일 뒤', char: { fontFamily: '굴림', fontSizePt: 12 }, para: {} },
+        { index: 1, text: '그림 № 시스템  몇일 구성도', char: { fontFamily: '굴림', fontSizePt: 9 }, para: {}, area: { kind: 'caption' as const, of: 'picture' as const, number: 1 } },
+      ],
+    };
+    const proposals = (await mock.propose({ request: req({ document: withCaption }) })).proposals;
+    expect(proposals.find((p) => p.title === '"몇일" 고치기')?.ops.map((o) => o.paragraph)).toEqual([0, 1]);
+    const plain = await mock.propose({ request: req({ mode: 'format_check', criteria: 'rules', rulesText: '본문은 10pt', document: withCaption }) });
+    for (const p of plain.proposals) expect(p.ops.map((o) => o.paragraph)).toEqual([0]);
+    const named = await mock.propose({ request: req({ mode: 'format_check', criteria: 'rules', rulesText: '캡션은 10pt', document: withCaption }) });
+    for (const p of named.proposals) expect(p.ops.map((o) => o.paragraph)).toEqual([0, 1]);
+  });
 });

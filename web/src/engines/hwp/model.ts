@@ -4,11 +4,15 @@
 //   머리말(모든 구역)이 맨 앞에 오고, 그다음 본문 문단이 이어진다. 본문 문단 다음에는 그 문단에 놓인 표의 칸 안 문단(표 안의 표 포함)과
 //   글상자 안 문단(표 칸 안·글상자 안에 놓인 글상자 포함), 그 문단에 달린 각주·미주 문단이 컨트롤 순서대로 이어지고, 꼬리말이 맨 끝에 온다.
 //   머리말·꼬리말·각주가 없고 표·글상자도 없는 문서에서는 본문 문단 번호(구역을 이어 붙인 번호)와 같다.
-//   표 안에 달린 각주와, 머리말·꼬리말·각주 안의 글상자, 묶음(그리기) 개체 안의 글상자, 그림·도형·묶음 개체의 캡션은 다루지 않는다.
-//   표 안에 달린 각주는 코어가 그 위치를 가리키는 방법을 주지 않고, 글상자는 코어의 경로 함수가 그곳을 가리키지 못한다. 캡션은 글상자가 아니라서 읽지 않는다.
+//   그림 캡션(글 캡션이 달린 그림)과 표 캡션의 문단은 그 개체가 든 문단 다음에(표 캡션은 표 칸 문단들의 앞이나 뒤에, 표의 캡션 방향을 따라) 이어진다.
+//   표 안에 달린 각주와, 머리말·꼬리말·각주 안의 글상자, 묶음(그리기) 개체 안의 글상자, 도형·묶음 개체의 캡션, 표 칸·글상자 안에 놓인 표의 캡션은 다루지 않는다.
+//   표 안에 달린 각주는 코어가 그 위치를 가리키는 방법을 주지 않고, 글상자는 코어의 경로 함수가 그곳을 가리키지 못한다. 도형·묶음 개체의 캡션과 안쪽 표의 캡션도 코어에 닿는 길이 없다.
 // 글상자: 코어는 글상자(사각형·타원·다각형·곡선 개체가 가진 글)를 표 칸과 같은 경로 함수(*InCellByPath)로 읽고 고치게 해 준다
 //   (경로 한 단계 = 글상자를 가진 개체의 컨트롤 번호, 칸 번호 0, 글상자 안 문단 번호). 표와 글상자가 섞여 중첩된 경로도 같은 방식으로 가리킨다.
 //   문단 서식은 코어에 경로 함수가 없어서 표 칸처럼 본문 문단에 바로 놓인 글상자(깊이 1)만 읽고 바꾼다.
+// 캡션: 그림 캡션은 글상자처럼 경로 함수로(어느 깊이든), 표 캡션은 평평한 함수에 칸 번호 65534 를 넣어서(본문 문단에 바로 놓인 표만) 읽고 고친다.
+//   캡션 문단의 "번호 넣기"(자동 번호)는 코어가 위치 정보 없이 공백 한 글자로만 보여 준다. 그 자리를 글의 모양으로 어림해(captionNumberZone) 표지(№)로 바꿔
+//   AI 에게 보여 주고, 그 자리를 건드리는 변경은 거절한다.
 // 글자 위치: 코어는 유니코드 "글자"(코드 포인트) 단위로 센다. 자바스크립트 문자열 위치(UTF-16)와 다를 수 있어 바꿔서 쓴다.
 import {
   textGuard,
@@ -57,12 +61,22 @@ export interface HwpDocLike {
   deleteTextInCellByPath(section: number, parentPara: number, pathJson: string, offset: number, count: number): string;
   applyCharFormatInCellByPath(section: number, parentPara: number, pathJson: string, start: number, end: number, propsJson: string): string;
   setCharShapeIdInCellByPath(section: number, parentPara: number, pathJson: string, start: number, end: number, charShapeId: number): string;
-  // 문단 서식은 코어가 경로 기반 함수를 주지 않아서, 본문에 놓인 표(깊이 1)의 칸과 본문에 놓인 글상자(깊이 1, 칸 번호 0)만 읽고 바꿀 수 있다.
+  // 평평한 함수(본문 문단에 놓인 개체의 칸 하나를 (구역, 문단, 컨트롤, 칸 번호, 칸 안 문단)으로 가리킨다). 표 캡션은 칸 번호 65534 로만 닿는다.
+  getCellParagraphCount(section: number, parentPara: number, control: number, cell: number): number;
+  getCellParagraphLength(section: number, parentPara: number, control: number, cell: number, cellPara: number): number;
+  getTextInCell(section: number, parentPara: number, control: number, cell: number, cellPara: number, offset: number, count: number): string;
+  insertTextInCell(section: number, parentPara: number, control: number, cell: number, cellPara: number, offset: number, text: string): string;
+  deleteTextInCell(section: number, parentPara: number, control: number, cell: number, cellPara: number, offset: number, count: number): string;
+  getCellCharPropertiesAt(section: number, parentPara: number, control: number, cell: number, cellPara: number, offset: number): string;
+  applyCharFormatInCell(section: number, parentPara: number, control: number, cell: number, cellPara: number, start: number, end: number, propsJson: string): string;
+  setCharShapeIdInCell(section: number, parentPara: number, control: number, cell: number, cellPara: number, start: number, end: number, charShapeId: number): string;
+  getTableProperties(section: number, parentPara: number, control: number): string;
+  // 문단 서식은 코어가 경로 기반 함수를 주지 않아서, 본문에 놓인 표(깊이 1)의 칸과 본문에 놓인 글상자·그림 캡션(깊이 1, 칸 번호 0)과 표 캡션(칸 번호 65534)만 읽고 바꿀 수 있다.
   getCellParaPropertiesAt(section: number, parentPara: number, control: number, cell: number, cellPara: number): string;
   applyParaFormatInCell(section: number, parentPara: number, control: number, cell: number, cellPara: number, propsJson: string): string;
 
-  // 개체 하나를 내부 복사 칸에 복사하고 그 갈래를 이름("[표]", "[그림]", "[도형]")으로 알려 준다. 개체가 도형인지(그림이 아닌지) 가리는 데 쓴다.
-  // 글 캡션이 달린 그림도 글상자처럼 경로 함수로 문단이 읽혀서, 글상자로 세기 전에 도형인지를 따로 확인해야 한다.
+  // 개체 하나를 내부 복사 칸에 복사하고 그 갈래를 이름("[표]", "[그림]", "[도형]")으로 알려 준다. 개체가 도형인지 그림인지 가리는 데 쓴다.
+  // 글 캡션이 달린 그림도 글상자처럼 경로 함수로 문단이 읽혀서, 글상자로 세기 전에 도형인지 그림인지를 따로 확인해야 한다.
   // 개체가 든 문단은 본문이면 빈 경로("")로, 표 칸·글상자 안이면 그 문단까지의 경로(JSON)로 가리키고, 어느 쪽이든 따라간다.
   // (복사 칸은 이 문서 객체 안에만 있다. 우리는 붙여넣지 않고, 편집기 화면은 자기 문서 객체를 따로 가진다.)
   // 경로 방식 도형 속성 조회(getCellShapePropertiesByPath)는 쓰지 못한다: 그 문단이 표 칸일 때만 따라가고 글상자 안 문단은 따라가지 못한다.
@@ -148,7 +162,19 @@ interface BoxSlot extends PathSlotBase {
   innerIsBox: boolean;
 }
 
-type PathSlot = CellSlot | BoxSlot;
+/**
+ * 그림·표 캡션 안의 문단. 그림 캡션은 글상자처럼 경로로 읽고(그림이 표 칸·글상자 안에 놓여도 같다), 표 캡션은 칸 번호 65534 를 쓰는 평평한 함수로 읽는다
+ * (본문 문단에 바로 놓인 표만. 이때 path 는 [{표 컨트롤 번호, 65534, 캡션 문단 번호}] 한 단계이고 경로 함수는 쓰지 못한다).
+ * 번호는 그림 캡션이면 "캡션이 달린 그림"을 문서 순서로 센 번호, 표 캡션이면 표 번호(표 칸 위치 문구와 같은 번호)다.
+ */
+interface CaptionSlot extends PathSlotBase {
+  kind: 'caption';
+  place: AreaPlace;
+  /** 표 캡션인가(아니면 그림 캡션) */
+  isTable: boolean;
+}
+
+type PathSlot = CellSlot | BoxSlot | CaptionSlot;
 
 /** 머리말·꼬리말 안의 문단 */
 interface HfSlot {
@@ -177,7 +203,7 @@ interface NoteSlot {
   place: AreaPlace;
 }
 
-type Slot = BodySlot | CellSlot | BoxSlot | HfSlot | NoteSlot;
+type Slot = BodySlot | CellSlot | BoxSlot | CaptionSlot | HfSlot | NoteSlot;
 
 /**
  * 코어가 돌려주는 JSON 중 getFootnoteInfo 는 글 속의 탭·줄바꿈 같은 제어 문자를 이스케이프하지 않는다(실제 예제 문서에서 확인했다).
@@ -186,8 +212,37 @@ type Slot = BodySlot | CellSlot | BoxSlot | HfSlot | NoteSlot;
  */
 const parseCoreJson = (raw: string): unknown => JSON.parse(raw.replace(/[\u0000-\u001f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`));
 
-/** 경로 함수로 읽고 고치는 문단 칸인가(표 칸 또는 글상자) */
-const isPathSlot = (slot: Slot): slot is PathSlot => slot.kind === 'cell' || slot.kind === 'box';
+/** 표 칸·글상자·캡션 안 문단 칸인가(코어의 칸 함수로 읽고 고친다) */
+const isPathSlot = (slot: Slot): slot is PathSlot => slot.kind === 'cell' || slot.kind === 'box' || slot.kind === 'caption';
+
+/** 코어가 표 캡션을 가리키는 칸 번호(TABLE_CAPTION_CELL_SENTINEL) */
+const TABLE_CAPTION_CELL = 65534;
+
+/** 캡션 문단의 번호 자리를 AI 에게 보여 주는 표지(공백 한 글자를 바꿔 넣으므로 글자 위치는 그대로다) */
+export const CAPTION_NUMBER_MARK = '№';
+
+/**
+ * 캡션 문단의 "번호 넣기"(자동 번호) 자리를 글의 모양으로 어림한다.
+ * 코어는 그 자리를 위치 정보 없이 글 속 공백 한 글자로만 보여 준다(내보낸 HWPX 의 XML 과 대조해 확인했다). 캡션 안 컨트롤의 위치를 알려 주는 함수는 없다.
+ * 어림: 글이 공백으로 시작하지 않고 첫 공백 덩어리가 둘 이상이면, 그 덩어리의 둘째 글자가 번호 자리다
+ * (실제 예제 문서의 번호 붙은 캡션 492개에서 모두 맞았다. "라벨 + 공백 + 번호 자리 + (공백) + 글" 모양이다).
+ * 번호 자리 글자는 그 492개에서 모두 일반 공백(U+0020)이었다. 사람이 친 특수 공백(예: 숫자 폭 공백 U+2007)은 번호 자리가 아니므로 그 글자면 번호가 없다고 본다
+ * (실제 예제 문서에 "Fig." + 공백 + U+2007 + "1." 꼴의 손으로 쓴 캡션이 있다).
+ * 번호 없는 캡션에서 일반 공백을 연달아 쓴 곳이 번호 자리로 보일 수 있고(그 자리를 건드리는 변경이 거절될 뿐이다),
+ * 코어가 새 캡션에 넣는 "그림  "처럼 번호 자리가 덩어리의 첫 글자일 때는 한 글자 어긋나지만, 덩어리 전체를 건드리지 않으므로 번호는 지켜진다.
+ * 반환: 번호 자리 글자의 위치(at)와 그것이 든 첫 공백 덩어리의 [from, to) (자바스크립트 문자열 위치. 공백은 모두 한 칸이라 코어의 글자 위치와 같다). 번호가 없어 보이면 null.
+ */
+export function captionNumberZone(raw: string): { at: number; from: number; to: number } | null {
+  if (/^\s/u.test(raw)) return null;
+  const run = /\s+/u.exec(raw);
+  if (!run || run[0].length < 2 || raw[run.index + 1] !== ' ') return null;
+  return { at: run.index + 1, from: run.index, to: run.index + run[0].length };
+}
+
+/** raw 의 [start, end) 를 replacement 로 바꾸는 일이 번호 자리가 든 공백 덩어리를 건드리는가(덩어리 안을 바꾸거나, 덩어리 가장자리에 공백을 붙여 번호 자리를 어긋나게 하는 경우) */
+function touchesCaptionNumber(zone: { from: number; to: number }, start: number, end: number, replacement: string): boolean {
+  return (start < zone.to && end > zone.from) || (end === zone.from && /\s$/u.test(replacement)) || (start === zone.to && /^\s/u.test(replacement));
+}
 
 /**
  * 각주 첫 문단의 맨 앞 글자는 번호 자리(자동 번호)이고 코어는 그것을 공백 한 글자로 보여 준다. 그 글자는 지우거나 바꾸면 번호가 깨지므로
@@ -217,6 +272,12 @@ export interface CellFocus {
   end?: number;
   /** 가장 바깥 표가 너무 커서(MAX_FOCUS_TABLE_PARAGRAPHS) 칸으로 이동하면 화면이 오래 멈춘다. 이동하지 않는다. */
   tooBig?: boolean;
+  /**
+   * 캡션의 번호 때문에 고칠 글의 자리를 정확히 짚지 못해서, 선택하지 않고 번호 앞에 캐럿만 둔다(captionNumberZone 참고).
+   * 코어는 캡션의 자동 번호를 글 속에 글자로 끼워 그려서, 편집기가 쓰는 글자 위치는 번호 뒤에서 번호의 글자 수(1 이상, 알 수 없다)만큼 어긋난다
+   * (실제 편집기에서 확인했다: 번호 뒤의 글을 선택하면 한 글자 앞으로 밀려서 엉뚱한 글이 선택된다).
+   */
+  approximate?: boolean;
 }
 
 const ALIGNS: readonly string[] = ['left', 'center', 'right', 'justify'];
@@ -294,8 +355,8 @@ export class HwpModel {
   private controlMemo: ControlEntry[] | null | undefined;
   /** 읽지 못한 각주·미주의 수(표 안에 달린 것은 코어가 위치를 가리키는 방법을 주지 않는다. 구역이 둘 이상인 문서에서는 표 안에 달린 것이 목록에서 빠져 이 수가 모자랄 수 있다) */
   private unreadableNotes = 0;
-  /** 찾은 표(글상자 안의 표 포함)와 글상자(글이 없는 것 포함)의 수, 그중 본문 문단에 바로 놓인 글상자의 수 */
-  private found = { tables: 0, boxes: 0, bodyBoxes: 0 };
+  /** 찾은 표(글상자 안의 표 포함)와 글상자(글이 없는 것 포함)의 수, 그중 본문 문단에 바로 놓인 글상자의 수, 읽은 그림 캡션·표 캡션(개체)의 수 */
+  private found = { tables: 0, boxes: 0, bodyBoxes: 0, pictureCaptions: 0, tableCaptions: 0 };
 
   constructor(
     private readonly doc: HwpDocLike,
@@ -328,13 +389,13 @@ export class HwpModel {
     return this.controlMemo;
   }
 
-  /** 문단(경로 paragraphPath, 본문 문단이면 빈 목록)에 든 컨트롤이 도형인가. 그림·표는 도형이 아니다. */
-  private isShapeControl(sec: number, host: number, paragraphPath: CellStep[], control: number): boolean {
+  /** 문단(경로 paragraphPath, 본문 문단이면 빈 목록)에 든 컨트롤의 갈래 이름("[도형]", "[그림]", "[표]"). 알 수 없으면 빈 문자열. */
+  private controlLabel(sec: number, host: number, paragraphPath: CellStep[], control: number): string {
     try {
       const r = JSON.parse(this.doc.copyControl(sec, host, paragraphPath.length === 0 ? '' : JSON.stringify(paragraphPath), control)) as { ok?: boolean; text?: string };
-      return r.ok === true && r.text === '[도형]';
+      return r.ok === true && typeof r.text === 'string' ? r.text : '';
     } catch {
-      return false;
+      return '';
     }
   }
 
@@ -381,6 +442,8 @@ export class HwpModel {
     let tables = 0;
     let boxes = 0;
     let bodyBoxes = 0;
+    let pictureCaptions = 0;
+    let tableCaptions = 0;
 
     // 각주·미주는 getControls() 로 위치를 알아낸다(그 목록의 문단 번호는 구역을 이어 붙인 번호라서 구역·구역 안 번호로 바꾼다).
     const sections = doc.getSectionCount();
@@ -421,6 +484,36 @@ export class HwpModel {
     const parse = <T>(raw: string): T => JSON.parse(raw) as T;
 
     /**
+     * 본문 문단에 바로 놓인 표의 캡션 문단 칸(캡션이 없으면 null). 코어는 표 캡션을 칸 번호 65534 로만 가리키고 경로 함수는 닿지 못해서,
+     * 표 안·글상자 안에 놓인 표의 캡션은 읽지 못한다. before 는 캡션이 표 위(또는 왼쪽)에 있는가: 그러면 표 칸 문단들보다 앞에 둔다.
+     */
+    const tableCaption = (sec: number, host: number, control: number, number: number): { slots: CaptionSlot[]; before: boolean } | null => {
+      let count: number;
+      try {
+        count = doc.getCellParagraphCount(sec, host, control, TABLE_CAPTION_CELL);
+      } catch {
+        return null; // 캡션이 없는 표
+      }
+      if (!(count > 0)) return null;
+      let before = false;
+      try {
+        // 캡션 방향: 0 왼쪽, 1 오른쪽, 2 위, 3 아래
+        const direction = parse<{ captionDirection?: number }>(doc.getTableProperties(sec, host, control)).captionDirection;
+        before = direction === 0 || direction === 2;
+      } catch {
+        // 방향을 몰라도 읽고 고치는 데는 영향이 없다(표 뒤에 둔다).
+      }
+      const place: AreaPlace = { kind: 'caption', of: 'table', number };
+      const slots: CaptionSlot[] = [];
+      for (let q = 0; q < Math.min(count, MAX_AREA_PARAGRAPHS); q++) {
+        const path = [{ controlIndex: control, cellIndex: TABLE_CAPTION_CELL, cellParaIndex: q }];
+        slots.push({ kind: 'caption', sec, host, path, pathJson: JSON.stringify(path), place, isTable: true, tableWeight: 0 });
+      }
+      tableCaptions++;
+      return { slots, before };
+    };
+
+    /**
      * tablePath 의 마지막 단계(controlIndex)가 가리키는 표의 모든 칸 안 문단을 담는다. depth 1 은 본문에 놓인 표.
      * inBox 는 이 표가 든 가장 안쪽 글상자의 번호(글상자 안의 표면 그 칸 문단은 글상자 칸으로 담는다), 글상자 안이 아니면 null.
      */
@@ -429,6 +522,8 @@ export class HwpModel {
       const last = tablePath[tablePath.length - 1] as CellStep;
       const base = tablePath.slice(0, -1);
       const number = ++tables;
+      const caption = base.length === 0 ? tableCaption(sec, host, last.controlIndex, number) : null;
+      if (caption?.before) out.push(...caption.slots);
       try {
         const dim = parse<{ cellCount: number }>(base.length === 0 ? doc.getTableDimensions(sec, host, last.controlIndex) : doc.getTableDimensionsByPath(sec, host, JSON.stringify(tablePath)));
         for (let k = 0; k < dim.cellCount; k++) {
@@ -452,11 +547,12 @@ export class HwpModel {
       } catch {
         // 읽을 수 없는 표는 건너뛴다(다른 표와 본문은 그대로 다룬다).
       }
+      if (caption && !caption.before) out.push(...caption.slots);
     };
 
     /**
-     * 문단(경로 paragraphPath, 본문 문단이면 빈 목록)에 든 컨트롤 j 가 글상자를 가진 도형이면 그 글상자 안 문단을 모두 담는다.
-     * 그림은 글 캡션이 달리면 경로 함수로 문단이 읽혀서 글상자와 구별되지 않으므로, 도형인지 확인한다.
+     * 문단(경로 paragraphPath, 본문 문단이면 빈 목록)에 든 컨트롤 j 가 글상자를 가진 도형이면 그 글상자 안 문단을 모두 담고,
+     * 글 캡션이 달린 그림이면 그 캡션 문단을 모두 담는다. 그림은 글 캡션이 달리면 경로 함수로 문단이 읽혀서 글상자와 구별되지 않으므로, 갈래를 확인한다.
      */
     const visitBox = (sec: number, host: number, paragraphPath: CellStep[], j: number, depth: number): void => {
       if (depth > MAX_TABLE_DEPTH || out.length >= MAX_SLOTS) return;
@@ -466,7 +562,17 @@ export class HwpModel {
       } catch {
         return; // 글상자가 아닌 컨트롤(그림·직선·묶음 등)
       }
-      if (!this.isShapeControl(sec, host, paragraphPath, j)) return;
+      const label = this.controlLabel(sec, host, paragraphPath, j);
+      if (label === '[그림]') {
+        const number = ++pictureCaptions;
+        const place: AreaPlace = { kind: 'caption', of: 'picture', number };
+        for (let q = 0; q < Math.min(count, MAX_AREA_PARAGRAPHS) && out.length < MAX_SLOTS; q++) {
+          const path = [...paragraphPath, { controlIndex: j, cellIndex: 0, cellParaIndex: q }];
+          out.push({ kind: 'caption', sec, host, path, pathJson: JSON.stringify(path), place, isTable: false, tableWeight: 0 });
+        }
+        return;
+      }
+      if (label !== '[도형]') return;
       const number = ++boxes;
       if (paragraphPath.length === 0) bodyBoxes++;
       for (let q = 0; q < Math.min(count, MAX_AREA_PARAGRAPHS) && out.length < MAX_SLOTS; q++) {
@@ -496,7 +602,7 @@ export class HwpModel {
     for (let s = 0; s < doc.getSectionCount(); s++) {
       const count = doc.getParagraphCount(s);
       for (let p = 0; p < count; p++) {
-        if (out.length >= MAX_SLOTS) return this.finishBodySlots(out, { tables, boxes, bodyBoxes });
+        if (out.length >= MAX_SLOTS) return this.finishBodySlots(out, { tables, boxes, bodyBoxes, pictureCaptions, tableCaptions });
         out.push({ kind: 'body', sec: s, para: p });
         let positions: unknown;
         try {
@@ -520,12 +626,12 @@ export class HwpModel {
           }
           if (isTable) visitTable(s, p, [{ controlIndex: c, cellIndex: 0, cellParaIndex: 0 }], 1, null);
           else visitBox(s, p, [], c, 1);
-          // 이 표·글상자(안쪽 표·글상자 포함)가 담은 문단 칸은 모두 방금 더해진 것들이다.
+          // 이 표·글상자·그림 캡션(안쪽 표·글상자 포함)이 담은 문단 칸은 모두 방금 더해진 것들이다.
           for (let k = first; k < out.length; k++) (out[k] as PathSlot).tableWeight = out.length - first;
         }
       }
     }
-    return this.finishBodySlots(out, { tables, boxes, bodyBoxes });
+    return this.finishBodySlots(out, { tables, boxes, bodyBoxes, pictureCaptions, tableCaptions });
   }
 
   private finishBodySlots(out: Slot[], found: HwpModel['found']): Slot[] {
@@ -535,7 +641,8 @@ export class HwpModel {
 
   /**
    * 문서 구조의 크기(시험·진단용): 본문 문단 수, 표 칸 안 문단 수, 표 수(표 안의 표·글상자 안의 표 포함),
-   * 글상자 수(글이 없는 글상자 포함)와 그중 본문 문단에 바로 놓인 수, 글상자 안 문단 수, 머리말·꼬리말 문단 수, 각주·미주 문단 수, 읽지 못한 각주·미주 수
+   * 글상자 수(글이 없는 글상자 포함)와 그중 본문 문단에 바로 놓인 수, 글상자 안 문단 수, 캡션 문단 수와 캡션이 달린 그림·표 수,
+   * 머리말·꼬리말 문단 수, 각주·미주 문단 수, 읽지 못한 각주·미주 수
    */
   describeStructure(): {
     bodyParagraphs: number;
@@ -544,6 +651,9 @@ export class HwpModel {
     boxes: number;
     bodyBoxes: number;
     boxParagraphs: number;
+    captionParagraphs: number;
+    pictureCaptions: number;
+    tableCaptions: number;
     headerFooterParagraphs: number;
     noteParagraphs: number;
     unreadableNotes: number;
@@ -557,6 +667,9 @@ export class HwpModel {
       boxes: this.found.boxes,
       bodyBoxes: this.found.bodyBoxes,
       boxParagraphs: count('box'),
+      captionParagraphs: count('caption'),
+      pictureCaptions: this.found.pictureCaptions,
+      tableCaptions: this.found.tableCaptions,
       headerFooterParagraphs: count('hf'),
       noteParagraphs: count('note'),
       unreadableNotes: this.unreadableNotes,
@@ -571,7 +684,7 @@ export class HwpModel {
 
   /**
    * 편집기에서 이 문단으로 이동하는 데 쓰는 위치(구역, 구역 안 문단 번호, 글자 수).
-   * 편집기의 공개 이동 수단은 본문 문단만 받아서, 표 안의 문단은 그 표가 놓인 본문 문단으로(inTable), 머리말·꼬리말·각주·미주·글상자 안의 문단은
+   * 편집기의 공개 이동 수단은 본문 문단만 받아서, 표 안의 문단은 그 표가 놓인 본문 문단으로(inTable), 머리말·꼬리말·각주·미주·글상자·캡션 안의 문단은
    * 그것을 정의했거나 단 본문 문단으로(area) 안내한다.
    */
   paragraphTarget(index: number): { section: number; paragraph: number; length: number; inTable: boolean; area?: AreaPlace } | null {
@@ -584,7 +697,7 @@ export class HwpModel {
         paragraph: para,
         length: this.doc.getParagraphLength(slot.sec, para),
         inTable: slot.kind === 'cell',
-        ...(slot.kind === 'hf' || slot.kind === 'note' || slot.kind === 'box' ? { area: slot.place } : {}),
+        ...(slot.kind === 'hf' || slot.kind === 'note' || slot.kind === 'box' || slot.kind === 'caption' ? { area: slot.place } : {}),
       };
     } catch {
       return null;
@@ -595,7 +708,7 @@ export class HwpModel {
    * 편집기를 이 문단(표 칸·글상자 안)으로 이동시키는 데 쓰는 위치. 본문 문단이면 null.
    * find 가 이 문단에 들어 있으면 그 글을 선택하도록 선택 끝(end)도 준다(위치와 길이는 코어의 글자 수 기준).
    * 위치 모양은 편집기의 DocumentPosition 과 같다: 평평한 칸 좌표는 가장 바깥 표·글상자 기준이고, 안쪽은 cellPath 에 전체 경로가 있다.
-   * 가장 안쪽 목록이 글상자면 isTextBox 를 켠다(편집기가 글상자 안 위치를 가리키는 방식과 같다).
+   * 가장 안쪽 목록이 글상자면 isTextBox 를 켠다(편집기가 글상자 안 위치를 가리키는 방식과 같다). 표 캡션은 칸 번호가 65534 다(편집기가 표 캡션을 가리키는 방식과 같다).
    */
   cellFocus(index: number, find?: string): CellFocus | null {
     const slot = this.locate(index);
@@ -609,6 +722,18 @@ export class HwpModel {
       if (at >= 0) {
         start = codePointLength(text.slice(0, at));
         end = start + codePointLength(find);
+      }
+    }
+    let approximate = false;
+    if (slot.kind === 'caption') {
+      // 번호 앞의 글은 정확히 가리킬 수 있다. 번호 자리나 그 뒤의 글은 가리키지 못해서 번호 앞에 캐럿만 둔다.
+      const raw = this.cellRaw(slot);
+      const zone = captionNumberZone(raw);
+      const numberAt = zone ? codePointLength(raw.slice(0, zone.at)) : 0; // 코어의 글자 위치(코드 포인트)로 바꾼다
+      if (zone && end !== undefined && end > numberAt) {
+        start = Math.min(start, numberAt);
+        end = undefined;
+        approximate = true;
       }
     }
     const tooBig = slot.tableWeight > MAX_FOCUS_TABLE_PARAGRAPHS;
@@ -627,6 +752,7 @@ export class HwpModel {
       },
       ...(end !== undefined ? { end } : {}),
       ...(tooBig ? { tooBig: true } : {}),
+      ...(approximate ? { approximate: true } : {}),
     };
   }
 
@@ -656,11 +782,60 @@ export class HwpModel {
         return len <= 0 ? '' : this.doc.getTextRange(slot.sec, slot.para, 0, len);
       }
       case 'cell':
-      case 'box': {
-        const len = this.doc.getCellParagraphLengthByPath(slot.sec, slot.host, slot.pathJson);
-        return len <= 0 ? '' : this.doc.getTextInCellByPath(slot.sec, slot.host, slot.pathJson, 0, len);
+      case 'box':
+        return this.cellRaw(slot);
+      case 'caption': {
+        // 번호 자리를 표지로 바꿔 보여 준다(글자 위치는 그대로).
+        const raw = this.cellRaw(slot);
+        const zone = captionNumberZone(raw);
+        return zone ? raw.slice(0, zone.at) + CAPTION_NUMBER_MARK + raw.slice(zone.at + 1) : raw;
       }
     }
+  }
+
+  // 표 칸·글상자·캡션 문단 하나를 코어에서 읽고 고치는 함수들. 표 캡션만 칸 번호 65534 를 쓰는 평평한 함수로, 나머지는 경로 함수로 간다.
+
+  /** 평평한 함수로 가야 하는 칸(표 캡션)이면 그 좌표, 아니면 null */
+  private flatStep(slot: PathSlot): CellStep | null {
+    return slot.kind === 'caption' && slot.isTable ? (slot.path[0] as CellStep) : null;
+  }
+
+  /** 칸 문단의 글(코어가 돌려주는 그대로) */
+  private cellRaw(slot: PathSlot): string {
+    const f = this.flatStep(slot);
+    if (f) {
+      const len = this.doc.getCellParagraphLength(slot.sec, slot.host, f.controlIndex, f.cellIndex, f.cellParaIndex);
+      return len <= 0 ? '' : this.doc.getTextInCell(slot.sec, slot.host, f.controlIndex, f.cellIndex, f.cellParaIndex, 0, len);
+    }
+    const len = this.doc.getCellParagraphLengthByPath(slot.sec, slot.host, slot.pathJson);
+    return len <= 0 ? '' : this.doc.getTextInCellByPath(slot.sec, slot.host, slot.pathJson, 0, len);
+  }
+
+  private cellCharAt(slot: PathSlot, offset: number): CoreChar {
+    const f = this.flatStep(slot);
+    const raw = f ? this.doc.getCellCharPropertiesAt(slot.sec, slot.host, f.controlIndex, f.cellIndex, f.cellParaIndex, offset) : this.doc.getCellCharPropertiesAtByPath(slot.sec, slot.host, slot.pathJson, offset);
+    return JSON.parse(raw) as CoreChar;
+  }
+
+  private cellInsert(slot: PathSlot, offset: number, text: string): boolean {
+    const f = this.flatStep(slot);
+    return ok(f ? this.doc.insertTextInCell(slot.sec, slot.host, f.controlIndex, f.cellIndex, f.cellParaIndex, offset, text) : this.doc.insertTextInCellByPath(slot.sec, slot.host, slot.pathJson, offset, text));
+  }
+
+  private cellDelete(slot: PathSlot, offset: number, count: number): boolean {
+    const f = this.flatStep(slot);
+    return ok(f ? this.doc.deleteTextInCell(slot.sec, slot.host, f.controlIndex, f.cellIndex, f.cellParaIndex, offset, count) : this.doc.deleteTextInCellByPath(slot.sec, slot.host, slot.pathJson, offset, count));
+  }
+
+  private cellApplyChar(slot: PathSlot, start: number, end: number, propsJson: string): boolean {
+    const f = this.flatStep(slot);
+    return ok(f ? this.doc.applyCharFormatInCell(slot.sec, slot.host, f.controlIndex, f.cellIndex, f.cellParaIndex, start, end, propsJson) : this.doc.applyCharFormatInCellByPath(slot.sec, slot.host, slot.pathJson, start, end, propsJson));
+  }
+
+  private cellSetShape(slot: PathSlot, start: number, end: number, charShapeId: number): void {
+    const f = this.flatStep(slot);
+    if (f) this.doc.setCharShapeIdInCell(slot.sec, slot.host, f.controlIndex, f.cellIndex, f.cellParaIndex, start, end, charShapeId);
+    else this.doc.setCharShapeIdInCellByPath(slot.sec, slot.host, slot.pathJson, start, end, charShapeId);
   }
 
   /** 글자 서식. 읽을 수 없는 곳(각주·미주 안)은 null. */
@@ -674,11 +849,12 @@ export class HwpModel {
         return JSON.parse(this.doc.getCharPropertiesAt(slot.sec, slot.para, offset)) as CoreChar;
       case 'cell':
       case 'box':
-        return JSON.parse(this.doc.getCellCharPropertiesAtByPath(slot.sec, slot.host, slot.pathJson, offset)) as CoreChar;
+      case 'caption':
+        return this.cellCharAt(slot, offset);
     }
   }
 
-  /** 문단 서식. 읽을 수 없는 칸(표 안의 표, 표 칸·글상자 안에 놓인 글상자 등 깊이 2 이상)은 null. */
+  /** 문단 서식. 읽을 수 없는 칸(표 안의 표, 표 칸·글상자 안에 놓인 글상자·그림의 캡션 등 깊이 2 이상)은 null. 표 캡션은 칸 번호 65534 로 읽는다. */
   private paraProps(slot: Slot): CorePara | null {
     switch (slot.kind) {
       case 'body':
@@ -688,7 +864,8 @@ export class HwpModel {
       case 'note':
         return JSON.parse(this.doc.getParaPropertiesInFootnote(slot.sec, slot.host, slot.control, slot.para)) as CorePara;
       case 'cell':
-      case 'box': {
+      case 'box':
+      case 'caption': {
         if (slot.path.length > 1) return null;
         const step = slot.path[0] as CellStep;
         return JSON.parse(this.doc.getCellParaPropertiesAt(slot.sec, slot.host, step.controlIndex, step.cellIndex, step.cellParaIndex)) as CorePara;
@@ -707,7 +884,8 @@ export class HwpModel {
         return ok(this.doc.applyCharFormat(slot.sec, slot.para, start, end, json));
       case 'cell':
       case 'box':
-        return ok(this.doc.applyCharFormatInCellByPath(slot.sec, slot.host, slot.pathJson, start, end, json));
+      case 'caption':
+        return this.cellApplyChar(slot, start, end, json);
     }
   }
 
@@ -721,7 +899,8 @@ export class HwpModel {
       case 'note':
         return ok(this.doc.applyParaFormatInFootnote(slot.sec, slot.host, slot.control, slot.para, json));
       case 'cell':
-      case 'box': {
+      case 'box':
+      case 'caption': {
         const step = slot.path[0] as CellStep;
         return slot.path.length === 1 && ok(this.doc.applyParaFormatInCell(slot.sec, slot.host, step.controlIndex, step.cellIndex, step.cellParaIndex, json));
       }
@@ -746,7 +925,7 @@ export class HwpModel {
 
   /**
    * 글자 위치 start 부터 length 글자를 replacement 로 바꾼다(위치와 길이는 코어의 글자 수 기준).
-   * 본문은 코어의 글 바꾸기를 쓰고, 표 칸·글상자는 코어에 글 바꾸기가 없어서 "새 글을 옛 글 바로 뒤에 넣고 옛 글을 지운다".
+   * 본문은 코어의 글 바꾸기를 쓰고, 표 칸·글상자·캡션은 코어에 글 바꾸기가 없어서 "새 글을 옛 글 바로 뒤에 넣고 옛 글을 지운다".
    * 이렇게 하면 새 글이 옛 글의 서식을 이어받는다. 옛 글 안에서 글자 모양이 갈린 경우를 위해, 바꾼 뒤에는 옛 글 첫 글자의 글자 모양을 새 글에 그대로 입힌다.
    * 머리말·꼬리말·각주는 코어의 글 바꾸기(머리말·꼬리말)가 새 글에 "바꾸는 글 바로 앞 글자"의 서식을 입혀서(굵은 낱말을 바꾸면 굵기가 사라진다) 쓰지 않고,
    * 새 글을 옛 글의 첫 글자 바로 뒤에 넣어 그 글자의 서식을 그대로 이어받게 한 뒤 옛 글(첫 글자와 나머지)을 지운다.
@@ -757,14 +936,14 @@ export class HwpModel {
 
     const added = codePointLength(replacement);
     const shapeBefore = length > 0 && added > 0 ? this.charProps(slot, start)?.charShapeId : undefined;
-    if (added > 0 && !ok(this.doc.insertTextInCellByPath(slot.sec, slot.host, slot.pathJson, start + length, replacement))) return false;
-    if (length > 0 && !ok(this.doc.deleteTextInCellByPath(slot.sec, slot.host, slot.pathJson, start, length))) {
+    if (added > 0 && !this.cellInsert(slot, start + length, replacement)) return false;
+    if (length > 0 && !this.cellDelete(slot, start, length)) {
       // 새 글은 이미 들어갔다: 지워서 원래대로 돌려 놓는다.
-      if (added > 0) this.doc.deleteTextInCellByPath(slot.sec, slot.host, slot.pathJson, start + length, added);
+      if (added > 0) this.cellDelete(slot, start + length, added);
       return false;
     }
     if (shapeBefore !== undefined && this.charProps(slot, start)?.charShapeId !== shapeBefore) {
-      this.doc.setCharShapeIdInCellByPath(slot.sec, slot.host, slot.pathJson, start, start + added, shapeBefore);
+      this.cellSetShape(slot, start, start + added, shapeBefore);
     }
     return true;
   }
@@ -818,7 +997,7 @@ export class HwpModel {
       if (pr.lineSpacingType === 'Percent' && typeof pr.lineSpacing === 'number') para.lineSpacingPct = Math.round(pr.lineSpacing);
       const info: ParagraphInfo = { index, text, char, para };
       if (slot.kind === 'cell') info.cell = slot.place;
-      else if (slot.kind === 'hf' || slot.kind === 'note' || slot.kind === 'box') info.area = slot.place;
+      else if (slot.kind === 'hf' || slot.kind === 'note' || slot.kind === 'box' || slot.kind === 'caption') info.area = slot.place;
       paragraphs.push(info);
     });
     return { kind: this.format, paragraphs, pageCount: this.doc.pageCount() };
@@ -880,17 +1059,27 @@ export class HwpModel {
       if (idx < 0) return stale('문서가 바뀌어 고칠 글을 찾을 수 없어요.');
     }
 
+    // 캡션은 표지(№)를 끼운 글이 아니라 코어의 글 그대로 비교해야 한다(번호 자리 어림이 바뀐 글에서 달라질 수 있다).
+    const raw = slot.kind === 'caption' ? this.cellRaw(slot) : cur;
+    if (slot.kind === 'caption') {
+      const zone = captionNumberZone(raw);
+      if (zone && touchesCaptionNumber(zone, idx, idx + op.find.length, op.replace)) {
+        return unsupported('캡션의 번호(번호 넣기)가 든 자리와 그 둘레 공백은 바꿀 수 없어요. 라벨이나 뒤따르는 글만 바꿔 주세요.');
+      }
+    }
+
     const start = codePointLength(cur.slice(0, idx));
     const length = codePointLength(op.find);
-    const expected = cur.slice(0, idx) + op.replace + cur.slice(idx + op.find.length);
+    const expected = raw.slice(0, idx) + op.replace + raw.slice(idx + op.find.length);
     if (!this.replaceRange(slot, start, length, op.replace)) return failed('한글 편집기가 글을 바꾸지 못했어요.');
 
-    const after = this.text(slot);
-    if (after !== expected) {
+    const afterRaw = slot.kind === 'caption' ? this.cellRaw(slot) : this.text(slot);
+    if (afterRaw !== expected) {
       // 코어가 예상과 다르게 바꿨다: 가능한 만큼 원래대로 돌려 놓고 실패로 알린다.
       this.replaceRange(slot, start, codePointLength(op.replace), op.find);
       return failed('한글 편집기가 글을 예상과 다르게 바꿔서 변경을 취소했어요.');
     }
+    const after = this.text(slot);
     return { ok: true, inverse: { type: 'replaceText', paragraph: op.paragraph, find: op.replace, replace: op.find, at: idx, guard: textGuard(after) } };
   }
 
@@ -961,7 +1150,9 @@ export class HwpModel {
       return unsupported(
         slot.kind === 'box'
           ? '표 칸이나 다른 글상자 안에 놓인 글상자(또는 글상자 안 표)의 문단은 정렬·줄 간격을 아직 바꿀 수 없어요.'
-          : '표 안의 표에 있는 문단의 정렬·줄 간격은 아직 바꿀 수 없어요.',
+          : slot.kind === 'caption'
+            ? '표 칸이나 글상자 안에 놓인 그림의 캡션은 정렬·줄 간격을 아직 바꿀 수 없어요.'
+            : '표 안의 표에 있는 문단의 정렬·줄 간격은 아직 바꿀 수 없어요.',
       );
     }
     const s = op.style;

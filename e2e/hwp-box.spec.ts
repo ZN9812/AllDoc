@@ -86,7 +86,7 @@ test.describe('한글 문서의 글상자', () => {
     await page.getByRole('tab', { name: /서식 점검/ }).click();
     await expect(page.getByText('같은 역할의 문단끼리 서식이 다른 곳을 찾지 못했어요.')).toBeVisible();
     await expect(page.getByRole('button', { name: '변경 내역에 올리기' })).toBeDisabled();
-    await expect(page.getByTestId('coverage-note')).toContainText('글상자를 다뤄요');
+    await expect(page.getByTestId('coverage-note')).toContainText('글상자, 그림·표 캡션을 다뤄요');
   });
 
   // "문서에서 보기": 본문에 놓인 글상자, 글상자 안의 글상자, 글상자 안 표의 칸은 편집기가 그 글로 이동해 선택 표시를 보여 준다.

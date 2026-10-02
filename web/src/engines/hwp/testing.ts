@@ -300,3 +300,108 @@ export function openBoxSample(spec: BoxSampleSpec, format: HwpFormat = 'hwp', tw
   const doc = new Doc(bytes);
   return { doc, model: new HwpModel(doc, format), boxes };
 }
+
+/** 한 픽셀짜리 PNG(시험용 그림) */
+export const TEST_PNG = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
+
+/** 코어가 표 캡션을 가리키는 칸 번호 */
+export const TABLE_CAPTION_CELL = 65534;
+
+/** 시험용 문서에 만들 그림·표 캡션 */
+export interface CaptionSampleSpec {
+  /** 본문 줄들(줄마다 한 문단). 개체를 놓을 줄은 빈 문자열로 둔다. */
+  body: string[];
+  /** 본문 문단 para 에 그림을 놓고 글 캡션을 단다. caption 은 번호 자리 뒤에 이어 쓸 글(없으면 "그림 번호"만 있는 캡션) */
+  pictures?: Array<{ para: number; caption?: string }>;
+  /** 본문 문단 para 에 표를 놓고 글 캡션을 단다. direction 은 캡션 위치(기본 아래) */
+  tables?: Array<{ para: number; cells: string[][]; caption?: string; direction?: 'top' | 'bottom' }>;
+}
+
+export interface CaptionSampleInfo {
+  doc: HwpDocument;
+  model: HwpModel;
+  /** 문서 순서로 센 그림·표가 놓인 본문 문단 번호와 컨트롤 번호(내보냈다 다시 연 뒤의 값) */
+  pictures: Array<{ para: number; control: number }>;
+  tables: Array<{ para: number; control: number }>;
+}
+
+/**
+ * 코어가 새 캡션에 넣는 글("그림  ": 라벨 + 번호 자리 + 공백)을 실제 문서처럼 "라벨 + 공백 + 번호 자리 + 공백 + 글"로 바꾼다
+ * (내보낸 HWPX 의 XML 에서 `그림 ` + autoNum + ` 글` 이 되는 모양이다).
+ */
+function dressCaption(raw: { length(): number; insert(offset: number, text: string): void }, labelLength: number, text: string | undefined): void {
+  raw.insert(labelLength, ' ');
+  if (text) raw.insert(raw.length(), text);
+}
+
+/**
+ * 본문 줄에 글 캡션이 달린 그림·표를 놓은 문서를 만들어 파일(바이트)로 내보낸다. 그림·표가 놓인 문단·컨트롤 번호는 내보내기 전의 값이다(다시 열어도 같다).
+ * 개체는 뒤쪽 문단부터 놓는다(표를 놓으면 코어가 뒤에 문단을 하나 더 만들어 뒤 번호를 밀기 때문). 그림·표의 위치는 만든 뒤 컨트롤 목록에서 읽는다.
+ */
+export function buildCaptionSample(
+  spec: CaptionSampleSpec,
+  format: HwpFormat = 'hwp',
+  tweak?: (doc: HwpDocument, placed: Pick<CaptionSampleInfo, 'pictures' | 'tables'>) => void,
+): { bytes: Uint8Array } & Pick<CaptionSampleInfo, 'pictures' | 'tables'> {
+  const Doc = loadNodeCore();
+  const built = Doc.createEmpty();
+  built.createBlankDocument();
+  spec.body.forEach((line, i) => {
+    if (line) built.insertText(0, i, 0, line);
+    if (i < spec.body.length - 1) built.splitParagraph(0, i, built.getParagraphLength(0, i));
+  });
+
+  type Item = { para: number; picture?: NonNullable<CaptionSampleSpec['pictures']>[number]; table?: NonNullable<CaptionSampleSpec['tables']>[number] };
+  const items: Item[] = [...(spec.pictures ?? []).map((picture) => ({ para: picture.para, picture })), ...(spec.tables ?? []).map((table) => ({ para: table.para, table }))];
+  for (const item of items.sort((a, b) => b.para - a.para)) {
+    if (item.picture) {
+      const made = JSON.parse(built.insertPicture(0, item.para, 0, '', TEST_PNG, 7200, 7200, 1, 1, 'png', '시험 그림')) as { paraIdx: number; controlIdx: number };
+      built.setPictureProperties(0, made.paraIdx, made.controlIdx, JSON.stringify({ hasCaption: true }));
+      const path = JSON.stringify([{ controlIndex: made.controlIdx, cellIndex: 0, cellParaIndex: 0 }]);
+      dressCaption(
+        { length: () => built.getCellParagraphLengthByPath(0, made.paraIdx, path), insert: (o, t) => void built.insertTextInCellByPath(0, made.paraIdx, path, o, t) },
+        2,
+        item.picture.caption,
+      );
+    } else if (item.table) {
+      const t = item.table;
+      const cols = Math.max(...t.cells.map((r) => r.length));
+      const made = JSON.parse(built.createTable(0, t.para, 0, t.cells.length, cols)) as { paraIdx: number; controlIdx: number };
+      t.cells.forEach((row, r) =>
+        row.forEach((text, c) => {
+          if (text) built.insertTextInCell(0, made.paraIdx, made.controlIdx, r * cols + c, 0, 0, text);
+        }),
+      );
+      built.setTableProperties(0, made.paraIdx, made.controlIdx, JSON.stringify({ hasCaption: true, captionDirection: t.direction === 'top' ? 2 : 3 }));
+      dressCaption(
+        {
+          length: () => built.getCellParagraphLength(0, made.paraIdx, made.controlIdx, TABLE_CAPTION_CELL, 0),
+          insert: (o, text) => void built.insertTextInCell(0, made.paraIdx, made.controlIdx, TABLE_CAPTION_CELL, 0, o, text),
+        },
+        1,
+        t.caption,
+      );
+    }
+  }
+
+  // 그림·표가 놓인 자리를 컨트롤 목록(본문 것만)에서 문서 순서로 읽는다.
+  const controls = (JSON.parse(built.getControls()) as Array<{ ctrlId: string; list: number; para: number; controlIndex: number }>).filter((c) => c.list === 0);
+  const place = (id: string): Array<{ para: number; control: number }> => controls.filter((c) => c.ctrlId.trim() === id).map((c) => ({ para: c.para, control: c.controlIndex }));
+
+  const placed = { pictures: place('gso'), tables: place('tbl') };
+  tweak?.(built, placed);
+  const bytes = format === 'hwpx' ? built.exportHwpx() : built.exportHwp();
+  return { bytes: new Uint8Array(bytes), ...placed };
+}
+
+/** buildCaptionSample 로 만든 파일을 다시 열어(실제 파일을 여는 것과 같은 경로) 모델과 함께 돌려준다. */
+export function openCaptionSample(
+  spec: CaptionSampleSpec,
+  format: HwpFormat = 'hwp',
+  tweak?: (doc: HwpDocument, placed: Pick<CaptionSampleInfo, 'pictures' | 'tables'>) => void,
+): CaptionSampleInfo {
+  const Doc = loadNodeCore();
+  const { bytes, pictures, tables } = buildCaptionSample(spec, format, tweak);
+  const doc = new Doc(bytes);
+  return { doc, model: new HwpModel(doc, format), pictures, tables };
+}

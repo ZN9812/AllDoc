@@ -49,6 +49,10 @@ function areaNotice(area: AreaPlace, focused: boolean): string {
   if (!focused) return `${label}이(가) 있는 곳으로 이동하지 못했어요. 카드에 적힌 위치를 보고 직접 찾아 주세요.`;
   const name = areaName(area);
   if (area.kind === 'textbox') return `이 글은 ${label}에 있어요. 한글 편집기가 글상자 안으로 바로 이동하지는 못해서, ${name}가 든 문단으로 이동했어요.`;
+  if (area.kind === 'caption') {
+    const owner = area.of === 'table' ? '표가 있는 문단' : '그림이 있는 문단(표 칸·글상자 안의 그림이면 그것을 담은 문단)';
+    return `이 글은 ${label}에 있어요. 한글 편집기가 캡션으로 바로 이동하지는 못해서, ${owner}으로 이동했어요.`;
+  }
   if (area.kind === 'header' || area.kind === 'footer') {
     return `이 글은 ${label}에 있어요. 한글 편집기가 ${name}로 바로 이동하지는 못해서, ${name}을 넣은 문단으로 이동했어요.`;
   }
@@ -215,7 +219,11 @@ export default function HwpEngine({ doc, onReady, onDirty, onPages, onError, onN
               try {
                 const m = await sync();
                 const cell = m.cellFocus(t.paragraph, t.find);
-                if (cell && !cell.tooBig && focusCell(studio as RhwpEditor, cell)) return;
+                if (cell && !cell.tooBig && focusCell(studio as RhwpEditor, cell)) {
+                  // 캡션의 번호 뒤에 있는 글은 편집기가 글자 위치를 번호 글자 수만큼 어긋나게 세어서 선택으로 가리키지 못한다. 번호 앞에 캐럿만 둔 것을 알린다.
+                  if (cell.approximate) onNotice?.('캡션의 번호(자동 번호) 때문에 고칠 글을 정확히 선택해 보여 주지 못해서, 캡션의 번호 앞에 커서를 두었어요. 바뀔 글은 카드에서 확인하세요.');
+                  return;
+                }
                 const loc = m.paragraphTarget(t.paragraph);
                 if (!loc) return;
                 let focused = false;
