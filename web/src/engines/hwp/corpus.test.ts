@@ -131,6 +131,37 @@ describe.skipIf(files.length === 0 && !REQUIRED)('실제 한글 문서(예제 �
     for (const text of want.texts) expect(read.map((p) => p.text.trim())).toContain(text);
   });
 
+  // 누름틀(입력 칸)이 든 실제 글상자: field-01.hwp 의 둘째 구역 글상자 다섯 개 중 셋은 값이 채워진 누름틀이 들어 있다("03  목차 입력"에서 "목차 입력"이 누름틀의 값).
+  // 누름틀 안, 누름틀 시작을 걸치는 것, 값 전체, 누름틀 앞을 바꿔도 글이 맞게 바뀌고, 누름틀이 남고, 내보냈다 다시 읽어도 같고, 되돌리면 처음과 같다.
+  const FIELD_DOC = 'field-01.hwp';
+  const FIELD_BOX_EDITS: Array<[string, string, string, string]> = [
+    ['03  목차 입력', '목차', '차례', '03  차례 입력'],
+    ['03  목차 입력', '03  목차', '3 차례', '3 차례 입력'],
+    ['04  목차 입력', '목차 입력', '제목', '04  제목'],
+    ['05  목차 입력', '  ', ' ', '05 목차 입력'],
+  ];
+  it.skipIf(!files.includes(FIELD_DOC)).each(FIELD_BOX_EDITS)('누름틀이 든 글상자 "%s"에서 "%s"를 "%s"로 바꾼다', async (text, find, replace, want) => {
+    const { Doc, bytes, kind } = open(FIELD_DOC);
+    const fieldCount = (d: InstanceType<typeof Doc>): number => (JSON.parse(d.getFieldList()) as Array<{ name: string }>).filter((f) => f.name === '목차1').length;
+    const model = new HwpModel(new Doc(bytes), kind);
+    const before = model.summarize().paragraphs;
+    const found = before.find((p) => p.text === text);
+    expect(found?.area?.kind, `글상자 글을 찾지 못했어요: ${text}`).toBe('textbox');
+    const r = await model.apply([{ type: 'replaceText', paragraph: (found as ParagraphInfo).index, find, replace, guard: textGuard(text) }]);
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
+    if (!r.ok) return;
+    expect(model.summarize().paragraphs.find((p) => p.index === (found as ParagraphInfo).index)?.text).toBe(want);
+
+    const out = model.exportBytes();
+    expect(out.lossCount).toBe(0);
+    const reopened = new Doc(out.bytes);
+    expect(new HwpModel(reopened, kind).summarize().paragraphs.find((p) => p.index === (found as ParagraphInfo).index)?.text).toBe(want);
+    expect(fieldCount(reopened), '누름틀 수').toBe(fieldCount(new Doc(bytes)));
+
+    expect((await model.apply(r.inverse)).ok).toBe(true);
+    expect(model.summarize().paragraphs).toEqual(before);
+  });
+
   // 글이 전부 표 안에 있는 양식 문서들: 예전에는 읽을 문단이 0개였다.
   const FORMS = ['BlogForm_BookReview.hwp', 'form-002.hwpx', 'issue1949_giant_cell_nested_tables_perf.hwp'].filter((n) => files.includes(n));
   it.each(FORMS)('%s: 표 안의 글을 읽는다(글이 있는 표 칸 문단이 있고, 위치 정보를 가진다)', (name) => {
