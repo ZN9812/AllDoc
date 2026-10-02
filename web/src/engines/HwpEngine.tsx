@@ -40,15 +40,18 @@ async function studioInstalled(): Promise<boolean> {
 
 const failed = (message: string): ApplyFailure => ({ ok: false, reason: 'failed', message });
 
-/** 머리말·꼬리말·각주·미주 안의 글은 편집기가 바로 이동하지 못해서, 그것을 정의했거나 단 본문 문단으로 이동한다. 그렇다고 알리는 문구. */
+/**
+ * 머리말·꼬리말·각주·미주 안의 글은 편집기가 바로 이동하지 못해서, 그것을 정의했거나 단 본문 문단으로 이동한다. 그렇다고 알리는 문구.
+ * 글상자 안의 글은 편집기가 글상자 안으로 이동하는 것이 먼저이고, 그러지 못했을 때만 글상자를 가진(표 안이면 그 표가 놓인) 본문 문단으로 이동한다.
+ */
 function areaNotice(area: AreaPlace, focused: boolean): string {
   const label = areaLabel(area);
   if (!focused) return `${label}이(가) 있는 곳으로 이동하지 못했어요. 카드에 적힌 위치를 보고 직접 찾아 주세요.`;
+  const name = areaName(area);
+  if (area.kind === 'textbox') return `이 글은 ${label}에 있어요. 한글 편집기가 글상자 안으로 바로 이동하지는 못해서, ${name}가 든 문단으로 이동했어요.`;
   if (area.kind === 'header' || area.kind === 'footer') {
-    const name = areaName(area);
     return `이 글은 ${label}에 있어요. 한글 편집기가 ${name}로 바로 이동하지는 못해서, ${name}을 넣은 문단으로 이동했어요.`;
   }
-  const name = areaName(area);
   return `이 글은 ${label}에 있어요. 한글 편집기가 ${name}로 바로 이동하지는 못해서, ${name}를 단 문단으로 이동했어요.`;
 }
 
@@ -221,17 +224,20 @@ export default function HwpEngine({ doc, onReady, onDirty, onPages, onError, onN
                 } catch {
                   // 편집기가 이 문단으로의 이동을 거절했다.
                 }
-                if (loc.area) {
+                // 아주 큰 표 안의 글(글상자 포함)은 칸으로 이동하면 화면이 오래 멈춰서 이동하지 않고, 그 표가 있는 곳으로 안내한다.
+                const big = '이 표는 아주 커서, 칸으로 바로 이동하면 화면이 오래 멈춰요.';
+                if (loc.area && !cell?.tooBig) {
                   onNotice?.(areaNotice(loc.area, focused));
-                } else if (loc.inTable) {
-                  const big = '이 표는 아주 커서, 칸으로 바로 이동하면 화면이 오래 멈춰요.';
+                } else if (loc.inTable || cell?.tooBig) {
+                  const where = loc.area ? `${areaLabel(loc.area)}이(가) 든 표` : '표';
+                  const hint = loc.area ? '카드에 적힌 글상자 번호를 보세요.' : '카드에 적힌 행·열을 보세요.';
                   onNotice?.(
                     focused
                       ? cell?.tooBig
-                        ? `${big} 그 표가 있는 곳으로 이동했어요. 카드에 적힌 행·열을 보세요.`
+                        ? `${big} 그 ${where}가 있는 곳으로 이동했어요. ${hint}`
                         : '표 안의 글이에요. 한글 편집기가 칸으로 바로 이동하지는 못해서, 그 표가 있는 곳으로 이동했어요. 카드에 적힌 행·열을 보세요.'
                       : cell?.tooBig
-                        ? `${big} 그 표가 있는 곳으로도 이동하지 못했어요. 카드에 적힌 표·행·열을 보고 직접 찾아 주세요.`
+                        ? `${big} 그 ${where}가 있는 곳으로도 이동하지 못했어요. 카드에 적힌 위치를 보고 직접 찾아 주세요.`
                         : '표가 있는 곳으로 이동하지 못했어요. 카드에 적힌 표·행·열을 보고 직접 찾아 주세요.',
                   );
                 }

@@ -191,3 +191,112 @@ export function openAreaSample(
   const doc = new Doc(new Uint8Array(bytes));
   return { doc, model: new HwpModel(doc, format) };
 }
+
+/** 시험용 문서에 만들 글상자 하나 */
+export interface BoxSpec {
+  /** 이 글상자를 놓을 본문 문단 번호(`body` 의 줄 번호) */
+  para: number;
+  /** 글상자 안 문단마다 한 줄(빈 목록이면 글이 없는 글상자) */
+  lines: string[];
+}
+
+export interface BoxSampleSpec {
+  /** 본문 줄들(줄마다 한 문단) */
+  body: string[];
+  /** 본문 문단에 놓는 글상자들(문서 순서는 문단 번호 순이고, 한 문단에 둘 이상이면 적은 순서) */
+  boxes?: BoxSpec[];
+  /** 본문 문단에 표를 놓고 그 칸 하나에 글상자를 놓는다(표 칸 안의 글상자). at 은 [행, 열](0부터). */
+  cellBox?: { para: number; cells: string[][]; at: [number, number]; lines: string[] };
+  /** 본문에 놓인 글상자(boxes 의 몇 번째인가) 안에 글상자를 하나 더 놓는다(글상자 안의 글상자) */
+  innerBox?: { outer: number; lines: string[] };
+  /** 본문에 놓인 글상자(boxes 의 몇 번째인가) 안에 표를 하나 놓는다(글상자 안의 표) */
+  innerTable?: { outer: number; cells: string[][] };
+}
+
+export interface BoxSampleInfo {
+  doc: HwpDocument;
+  model: HwpModel;
+  /** 본문에 놓인 글상자마다 놓인 본문 문단 번호와 컨트롤 번호(내보냈다 다시 연 뒤의 값) */
+  boxes: Array<{ para: number; control: number }>;
+}
+
+/** 본문 문단 para 에 글상자를 만들고 글을 채운다. 글상자가 놓인 문단 번호와 컨트롤 번호를 돌려준다. */
+function putBox(d: HwpDocument, para: number, lines: string[]): { paraIdx: number; controlIdx: number } {
+  const made = JSON.parse(
+    d.createShapeControl(JSON.stringify({ sectionIdx: 0, paraIdx: para, charOffset: 0, width: 12000, height: 4000, horzOffset: 0, vertOffset: 0, shapeType: 'textbox', treatAsChar: false, textWrap: 'Square' })),
+  ) as { paraIdx: number; controlIdx: number };
+  fillBox(d, made.paraIdx, made.controlIdx, lines);
+  return made;
+}
+
+/** 글상자 안 문단들에 글을 채운다(첫 문단은 이미 있고, 나머지는 문단 나누기로 늘린다). */
+function fillBox(d: HwpDocument, para: number, control: number, lines: string[]): void {
+  lines.forEach((line, q) => {
+    if (q > 0) d.splitParagraphInCell(0, para, control, 0, q - 1, [...(lines[q - 1] as string)].length);
+    if (line) d.insertTextInCellByPath(0, para, JSON.stringify([{ controlIndex: control, cellIndex: 0, cellParaIndex: q }]), 0, line);
+  });
+}
+
+/**
+ * 본문 줄에 글상자를 놓은 문서를 만들어 파일(바이트)로 내보낸다. 글상자가 놓인 문단·컨트롤 번호는 내보내기 전의 값이다(내보냈다 다시 열어도 같다).
+ * 표 칸·글상자 안의 글상자와 글상자 안의 표는 코어에 직접 만드는 함수가 없어서, 본문 끝에 임시로 만들어 복사한 뒤 붙이고 임시 개체는 지운다
+ * (그래서 그런 구조를 쓰면 본문 끝에 빈 문단이 하나 남는다).
+ */
+export function buildBoxSample(spec: BoxSampleSpec, format: HwpFormat = 'hwp', tweak?: (doc: HwpDocument) => void): { bytes: Uint8Array; boxes: BoxSampleInfo['boxes'] } {
+  const Doc = loadNodeCore();
+  const built = Doc.createEmpty();
+  built.createBlankDocument();
+  spec.body.forEach((line, i) => {
+    if (line) built.insertText(0, i, 0, line);
+    if (i < spec.body.length - 1) built.splitParagraph(0, i, built.getParagraphLength(0, i));
+  });
+
+  const needsTemp = spec.cellBox !== undefined || spec.innerBox !== undefined || spec.innerTable !== undefined;
+  const tempPara = spec.body.length; // 임시 개체를 놓을 문단(본문 끝에 하나 더 둔다)
+  if (needsTemp) built.splitParagraph(0, spec.body.length - 1, built.getParagraphLength(0, spec.body.length - 1));
+
+  const placed = (spec.boxes ?? []).map((b) => putBox(built, b.para, b.lines));
+
+  if (spec.cellBox) {
+    const { para, cells, at, lines } = spec.cellBox;
+    const cols = Math.max(...cells.map((r) => r.length));
+    const t = JSON.parse(built.createTable(0, para, 0, cells.length, cols)) as { paraIdx: number; controlIdx: number };
+    cells.forEach((row, r) =>
+      row.forEach((text, c) => {
+        if (text) built.insertTextInCell(0, t.paraIdx, t.controlIdx, r * cols + c, 0, 0, text);
+      }),
+    );
+    const temp = putBox(built, tempPara, lines);
+    built.copyControl(0, temp.paraIdx, '', temp.controlIdx);
+    built.pasteInternalInCell(0, t.paraIdx, t.controlIdx, at[0] * cols + at[1], 0, 0);
+    built.deleteShapeControl(0, temp.paraIdx, temp.controlIdx);
+  }
+  if (spec.innerBox) {
+    const outer = placed[spec.innerBox.outer] as { paraIdx: number; controlIdx: number };
+    const temp = putBox(built, tempPara, spec.innerBox.lines);
+    built.copyControl(0, temp.paraIdx, '', temp.controlIdx);
+    built.pasteInternalInCellByPath(0, outer.paraIdx, JSON.stringify([{ controlIndex: outer.controlIdx, cellIndex: 0, cellParaIndex: 0 }]), 0);
+    built.deleteShapeControl(0, temp.paraIdx, temp.controlIdx);
+  }
+  if (spec.innerTable) {
+    const outer = placed[spec.innerTable.outer] as { paraIdx: number; controlIdx: number };
+    const t = putTable(built, tempPara, spec.innerTable.cells);
+    built.copyControl(0, t.paraIdx, '', t.controlIdx);
+    // 글상자 첫 문단의 끝에 붙인다(그 문단에 이미 든 글 뒤).
+    const path = JSON.stringify([{ controlIndex: outer.controlIdx, cellIndex: 0, cellParaIndex: 0 }]);
+    built.pasteInternalInCellByPath(0, outer.paraIdx, path, built.getCellParagraphLengthByPath(0, outer.paraIdx, path));
+    built.deleteTableControl(0, t.paraIdx, t.controlIdx);
+  }
+
+  tweak?.(built);
+  const bytes = format === 'hwpx' ? built.exportHwpx() : built.exportHwp();
+  return { bytes: new Uint8Array(bytes), boxes: placed.map((p) => ({ para: p.paraIdx, control: p.controlIdx })) };
+}
+
+/** buildBoxSample 로 만든 파일을 다시 열어(실제 파일을 여는 것과 같은 경로) 모델과 함께 돌려준다. */
+export function openBoxSample(spec: BoxSampleSpec, format: HwpFormat = 'hwp', tweak?: (doc: HwpDocument) => void): BoxSampleInfo {
+  const Doc = loadNodeCore();
+  const { bytes, boxes } = buildBoxSample(spec, format, tweak);
+  const doc = new Doc(bytes);
+  return { doc, model: new HwpModel(doc, format), boxes };
+}

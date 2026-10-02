@@ -63,7 +63,7 @@ test.describe('한글 문서의 머리말·꼬리말·각주', () => {
     await page.getByRole('tab', { name: /서식 점검/ }).click();
     await expect(page.getByText('같은 역할의 문단끼리 서식이 다른 곳을 찾지 못했어요.')).toBeVisible();
     await expect(page.getByRole('button', { name: '변경 내역에 올리기' })).toBeDisabled();
-    await expect(page.getByTestId('coverage-note')).toContainText('표·머리말·꼬리말·각주 안의 글은 AI 대화로 고쳐요');
+    await expect(page.getByTestId('coverage-note')).toContainText('표·머리말·꼬리말·각주·글상자 안의 글은 AI 대화로 고쳐요');
   });
 
   test('내 규칙에 "머리말"을 적으면 머리말의 글자 크기도 바뀌고, 되돌리면 처음 크기로 돌아간다', async ({ page }) => {

@@ -89,3 +89,76 @@ test.describe('실제 한글 문서의 표 칸으로 이동', () => {
     });
   }
 });
+
+// 글상자 안의 글로 이동: 실제 한글 문서의 글상자로 같은 방식으로 이동해 가리킨 글을 선택하는지 본다.
+// 편집기는 글상자 안 글을 복사하지 못해서(복사하면 빈 글이 나온다) 선택한 글을 읽는 대신, 선택 표시가 보이는 영역 안에 있고 너비가 선택한 글자 수에 맞는지 본다.
+// 본문에 바로 놓인 글상자(깊이 1)는 반드시 이동해야 한다. 안쪽에 놓인 글상자(경로가 둘 이상)는, 표 칸 안에 놓인 것을 편집기가 이동하지 못한다
+// (앱은 그럴 때 그 표가 놓인 문단으로 이동하고 알린다. hwp-box.spec.ts 가 앱 화면에서 확인한다).
+test.describe('실제 한글 문서의 글상자로 이동', () => {
+  for (const name of files) {
+    test(`${name}: 글상자 안의 글로 이동해 가리킨 글을 선택한다`, async ({ page }) => {
+      test.setTimeout(120_000);
+      const bytes = new Uint8Array(readFileSync(join(DIR, name)));
+      const Doc = loadNodeCore();
+      const model = new HwpModel(new Doc(bytes), name.toLowerCase().endsWith('x') ? 'hwpx' : 'hwp');
+      const boxes = model.summarize().paragraphs.filter((p) => p.area?.kind === 'textbox' && [...p.text.trim()].length >= 2);
+      test.skip(boxes.length === 0, '글상자 안에 글이 없는 문서');
+      const targets = boxes.slice(0, 8).map((p) => {
+        const chars = [...p.text];
+        const from = Math.floor(chars.length / 3);
+        const find = chars.slice(from, from + Math.min(4, chars.length - from)).join('');
+        // 이 글상자의 글자 크기(px)로 선택 표시의 너비가 맞는지 본다.
+        return { find, box: p.area?.number ?? 0, sizePx: ((p.char.fontSizePt ?? 10) * 96) / 72, focus: model.cellFocus(p.index, find) as CellFocus };
+      });
+      for (const t of targets) {
+        expect(t.focus, `이동 위치가 없어요: ${t.find}`).not.toBeNull();
+        expect(t.focus.position.isTextBox === true || (t.focus.position.cellPath?.length ?? 0) > 1, `글상자 안 위치가 아니에요: ${t.find}`).toBe(true);
+      }
+
+      await openFile(page, { name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) });
+      const frame = page.frames().find((f) => f.url().includes('rhwp-studio'));
+      if (!frame) throw new Error('한글 편집기 화면을 찾지 못했어요');
+
+      let moved = 0;
+      for (const t of targets) {
+        const got = await frame.evaluate(
+          async ({ position, end }) => {
+            const move = (window as unknown as { __alldocFocusCell?: (p: unknown, e?: number) => boolean }).__alldocFocusCell;
+            if (typeof move !== 'function' || move(position, end) !== true) return { moved: false, text: '', width: 0, inView: false };
+            const text = await new Promise<string>((resolve) => {
+              document.addEventListener('copy', (e) => resolve(e.clipboardData?.getData('text/plain') ?? ''), { once: true });
+              document.execCommand('copy');
+              setTimeout(() => resolve('(응답 없음)'), 3000);
+            });
+            await new Promise((r) => setTimeout(r, 200));
+            const view = document.getElementById('scroll-container')?.getBoundingClientRect();
+            const marks = Array.from(document.querySelectorAll('.selection-highlight')).map((e) => e.getBoundingClientRect());
+            const inView =
+              view !== undefined &&
+              marks.length > 0 &&
+              marks.every((b) => b.width > 0 && b.height > 0 && b.top >= view.top - 1 && b.bottom <= view.bottom + 1 && b.left >= view.left - 1 && b.right <= view.right + 1);
+            return { moved: true, text, width: marks.reduce((n, b) => n + b.width, 0), inView };
+          },
+          { position: t.focus.position, end: t.focus.end },
+        );
+        const label = `글상자 ${t.box} "${t.find}"`;
+        // 본문에 바로 놓인 글상자는 이동해야 한다. 안쪽에 놓인 것(경로가 둘 이상)은 편집기가 캐럿 자리를 구하지 못하는 경우(표 칸 안의 글상자)가 있어 이동하지 못해도 된다.
+        const nested = (t.focus.position.cellPath?.length ?? 0) > 1;
+        if (!got.moved) {
+          expect(nested, `${label}: 이동하지 못했어요`).toBe(true);
+          continue;
+        }
+        moved++;
+        expect(got.inView, `${label}: 선택 표시가 보이는 영역 밖이에요`).toBe(true);
+        const chars = [...t.find].filter((c) => c.trim()).length;
+        const spaces = [...t.find].length - chars;
+        const expected = (chars + spaces * 0.4) * t.sizePx; // 한글 한 글자는 글자 크기만큼, 빈칸은 그보다 좁다
+        expect(got.width, `${label}: 선택 표시의 너비(${Math.round(got.width)}px)가 선택한 글자 수에 맞지 않아요(기대 약 ${Math.round(expected)}px)`).toBeGreaterThan(expected * 0.4);
+        expect(got.width, `${label}: 선택 표시의 너비(${Math.round(got.width)}px)가 선택한 글자 수에 맞지 않아요(기대 약 ${Math.round(expected)}px)`).toBeLessThan(expected * 1.4 + 6);
+        // 경로 방식 위치(글상자 안의 글상자·표 칸)는 복사로 선택한 글도 읽을 수 있다.
+        if ((t.focus.position.cellPath?.length ?? 0) > 1) expect(squash(got.text), `${label}: 선택된 글이 달라요`).toBe(squash(t.find));
+      }
+      expect(moved > 0 || targets.every((t) => (t.focus.position.cellPath?.length ?? 0) > 1), '본문에 놓인 글상자로 이동하지 못했어요').toBe(true);
+    });
+  }
+});
