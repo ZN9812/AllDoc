@@ -235,7 +235,8 @@ describe.skipIf(files.length === 0 && !REQUIRED)('실제 한글 문서(예제 �
         const positions = JSON.parse(doc.getControlTextPositions(sec, p)) as unknown[];
         for (let c = 0; c < positions.length; c++) {
           try {
-            notes += (JSON.parse(doc.getFootnoteInfo(sec, p, c)) as { paraCount?: number }).paraCount ?? 0;
+            // 각주 정보(JSON)는 글 속의 탭을 이스케이프하지 않아 깨져 있을 수 있어서(모델은 그것을 고쳐 읽는다), 모델과 따로 문단 수만 글 그대로에서 뽑는다.
+            notes += Number(/"paraCount":(\d+)/.exec(doc.getFootnoteInfo(sec, p, c))?.[1] ?? 0);
           } catch {
             // 각주·미주가 아닌 컨트롤
           }

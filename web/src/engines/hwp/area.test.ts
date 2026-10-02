@@ -2,8 +2,8 @@
 // 머리말·꼬리말·각주·미주 안의 글을 읽고 고치는 시험. 코어가 만든 문서를 파일로 내보냈다가 다시 열어 쓰므로 실제 파일을 여는 것과 같은 경로를 탄다.
 import { textGuard, type DocSummary, type Op } from '@alldoc/shared';
 import { describe, expect, it } from 'vitest';
-import { HwpModel } from './model';
-import { openAreaSample, type AreaSampleSpec } from './testing';
+import { HwpModel, type HwpFormat } from './model';
+import { loadNodeCore, openAreaSample, type AreaSampleSpec } from './testing';
 
 // 슬롯 순서: 0 머리말, 1 본문 첫 문단, 2 그 문단의 각주, 3 본문 둘째 문단, 4 그 문단의 미주, 5·6 꼬리말 두 줄
 const SPEC: AreaSampleSpec = {
@@ -302,5 +302,53 @@ describe('편집기로 이동할 위치', () => {
   it('표 칸으로 이동하는 위치는 표 안의 문단에만 있다', () => {
     const { model } = openAreaSample(SPEC);
     for (const t of ['머리말 오랫만 입니다', ' 각주 되요 입니다', '꼬리말 할려고 합니다']) expect(model.cellFocus(indexOf(model, t))).toBeNull();
+  });
+});
+
+// 코어의 각주 정보(getFootnoteInfo)는 글 속의 탭을 이스케이프하지 않은 깨진 JSON 으로 돌려준다. 예전에는 그런 각주·미주를 읽지 못했다
+// (실제 예제 문서에서 확인했다: 3-09월_교육_통합_2023.hwp 는 미주 46개 중 42개가 그랬다).
+describe('글에 탭이 든 각주·미주', () => {
+  const FORMATS: HwpFormat[] = ['hwp', 'hwpx'];
+  const noteControl = (doc: ReturnType<typeof openAreaSample>['doc']) => {
+    const note = (JSON.parse(doc.getControls()) as Array<{ ctrlId: string; list: number; para: number; controlIndex: number }>).find((c) => c.ctrlId.trim() === 'fn' && c.list === 0);
+    if (!note) throw new Error('각주를 찾지 못했어요');
+    return note;
+  };
+  const open = (format: HwpFormat) =>
+    openAreaSample({ body: ['본문 문장 몇일'], notes: [{ para: 0, at: 2, lines: ['각주 몇일'] }] }, format, (built) => {
+      // 첫 문단 끝(번호 자리 2글자 + 글)에 탭과 글을 덧붙인다.
+      built.insertTextInFootnote(0, 0, noteControl(built).controlIndex, 0, 2 + [...'각주 몇일'].length, '\t되요');
+    });
+
+  it.each(FORMATS)('%s: 읽는다(읽지 못한 각주로 세지 않는다)', (format) => {
+    const { doc, model } = open(format);
+    const note = noteControl(doc);
+    // 시험 전제: 코어가 이 각주의 정보를 깨진 JSON 으로 돌려준다.
+    expect(() => JSON.parse(doc.getFootnoteInfo(0, note.para, note.controlIndex))).toThrow();
+    expect(model.describeStructure()).toMatchObject({ noteParagraphs: 1, unreadableNotes: 0 });
+    expect(texts(model.summarize())).toEqual(['본문 문장 몇일', ' 각주 몇일\t되요']);
+  });
+
+  it.each(FORMATS)('%s: 글을 바꾸고 되돌리고, 내보냈다 다시 열어도 같다(탭이 그대로 남는다)', async (format) => {
+    const { model } = open(format);
+    const fix = (text: string, find: string, replace: string): Op => ({ type: 'replaceText', paragraph: indexOf(model, text), find, replace, guard: textGuard(text) });
+    const before = model.summarize();
+
+    const first = await model.apply([fix(' 각주 몇일\t되요', '되요', '돼요')]);
+    expect(first, JSON.stringify(first)).toMatchObject({ ok: true });
+    expect(texts(model.summarize())).toEqual(['본문 문장 몇일', ' 각주 몇일\t돼요']);
+    const second = await model.apply([fix(' 각주 몇일\t돼요', '몇일', '며칠')]); // 탭 앞의 글도 고친다
+    expect(second, JSON.stringify(second)).toMatchObject({ ok: true });
+    expect(texts(model.summarize())).toEqual(['본문 문장 몇일', ' 각주 며칠\t돼요']);
+
+    const out = model.exportBytes();
+    expect(out.lossCount).toBe(0);
+    const Doc = loadNodeCore();
+    expect(texts(new HwpModel(new Doc(out.bytes), format).summarize())).toEqual(['본문 문장 몇일', ' 각주 며칠\t돼요']);
+
+    if (!first.ok || !second.ok) return;
+    expect((await model.apply(second.inverse)).ok).toBe(true);
+    expect((await model.apply(first.inverse)).ok).toBe(true);
+    expect(model.summarize()).toEqual(before);
   });
 });

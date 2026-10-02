@@ -179,6 +179,13 @@ interface NoteSlot {
 
 type Slot = BodySlot | CellSlot | BoxSlot | HfSlot | NoteSlot;
 
+/**
+ * 코어가 돌려주는 JSON 중 getFootnoteInfo 는 글 속의 탭·줄바꿈 같은 제어 문자를 이스케이프하지 않는다(실제 예제 문서에서 확인했다).
+ * JSON 은 문자열 안의 제어 문자를 허용하지 않아서 그대로는 읽히지 않으므로, 제어 문자를 \uXXXX 로 바꿔서 읽는다.
+ * 코어의 JSON 은 토큰 사이에 공백이 없어서 제어 문자는 모두 문자열 안에 있다.
+ */
+const parseCoreJson = (raw: string): unknown => JSON.parse(raw.replace(/[\u0000-\u001f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`));
+
 /** 경로 함수로 읽고 고치는 문단 칸인가(표 칸 또는 글상자) */
 const isPathSlot = (slot: Slot): slot is PathSlot => slot.kind === 'cell' || slot.kind === 'box';
 
@@ -398,7 +405,7 @@ export class HwpModel {
     const pushNote = (sec: number, host: number, control: number, kind: 'footnote' | 'endnote'): void => {
       let info: { paraCount?: number; number?: number };
       try {
-        info = JSON.parse(doc.getFootnoteInfo(sec, host, control)) as typeof info;
+        info = parseCoreJson(doc.getFootnoteInfo(sec, host, control)) as typeof info;
       } catch {
         this.unreadableNotes++;
         return;
@@ -627,7 +634,7 @@ export class HwpModel {
 
   /** 각주·미주 안 문단들의 글(코어가 돌려주는 그대로: 첫 문단 맨 앞에 번호 자리가 공백으로 들어 있다) */
   private noteTexts(slot: NoteSlot): string[] {
-    const info = JSON.parse(this.doc.getFootnoteInfo(slot.sec, slot.host, slot.control)) as { texts?: unknown };
+    const info = parseCoreJson(this.doc.getFootnoteInfo(slot.sec, slot.host, slot.control)) as { texts?: unknown };
     return Array.isArray(info.texts) ? info.texts.map(String) : [];
   }
 
