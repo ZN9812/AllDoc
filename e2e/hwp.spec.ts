@@ -166,7 +166,7 @@ test.describe('한글(HWP·HWPX) 문서', () => {
     await page.getByRole('tab', { name: /서식 점검/ }).click();
     const note = page.getByTestId('coverage-note');
     await expect(note).toContainText('본문, 표 안의 글, 머리말·꼬리말, 각주·미주, 글상자를 다뤄요');
-    await expect(note).toContainText('표 안에 달린 각주, 머리말·꼬리말 안의 글상자, 묶음(그리기) 개체 안의 글상자는 AI가 읽지 못해요');
+    await expect(note).toContainText('표 안에 달린 각주, 머리말·꼬리말 안의 글상자, 묶음(그리기) 개체 안의 글상자, 그림·도형의 캡션은 AI가 읽지 못해요');
     await expect(note).toContainText('서식 점검(문서 안 일관성·기준 문서)은 본문(표 밖)만 비교');
   });
 

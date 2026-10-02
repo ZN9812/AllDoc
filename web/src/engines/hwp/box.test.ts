@@ -127,6 +127,23 @@ describe('글상자 안의 글 읽기', () => {
     expect(s.paragraphs.some((p) => p.area?.kind === 'textbox')).toBe(false);
     expect(texts(s)).toEqual(['그림 위 문단', '칸 안 문단']);
   });
+
+  // 표에도 글 캡션이 붙을 수 있다. 캡션 문단은 표 칸이 아니라서 읽지 않고, 표 칸의 글은 그대로 읽는다.
+  it.each(FORMATS)('%s: 글 캡션이 달린 표는 캡션을 읽지 않고 표 칸의 글만 읽는다', (format) => {
+    const Doc = loadNodeCore();
+    const built = Doc.createEmpty();
+    built.createBlankDocument();
+    built.insertText(0, 0, 0, '표 위 문단');
+    built.splitParagraph(0, 0, built.getParagraphLength(0, 0));
+    const table = JSON.parse(built.createTable(0, 1, 0, 1, 1)) as { paraIdx: number; controlIdx: number };
+    built.insertTextInCell(0, table.paraIdx, table.controlIdx, 0, 0, 0, '칸 안 문단');
+    built.setTableProperties(0, table.paraIdx, table.controlIdx, JSON.stringify({ hasCaption: true }));
+    expect(JSON.parse(built.getTableProperties(0, table.paraIdx, table.controlIdx))).toMatchObject({ hasCaption: true }); // 시험 전제
+    const bytes = new Uint8Array(format === 'hwp' ? built.exportHwp() : built.exportHwpx());
+    const model = new HwpModel(new Doc(bytes), format);
+    expect(model.describeStructure()).toMatchObject({ tables: 1, cellParagraphs: 1, boxes: 0, boxParagraphs: 0 });
+    expect(texts(model.summarize())).toEqual(['표 위 문단', '칸 안 문단']);
+  });
 });
 
 describe('글상자 안의 글 고치기', () => {
