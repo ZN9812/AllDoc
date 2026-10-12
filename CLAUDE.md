@@ -1,7 +1,7 @@
 # AllDoc 작업 안내
 
 한글(HWP·HWPX)·Word(DOCX)·TXT/MD 를 브라우저에서 편집하고 PDF 는 보기만 하는 웹 편집기다. AI 는 서식·문장 변경을 **제안만** 하고, 사용자가 적용한 것만 문서에 반영된다.
-"AllDoc"은 임시 이름이다. 라이선스는 AGPL-3.0. 제품 명세 `docs/SPEC.md`, 화면 규칙 `docs/DESIGN.md`, AI 연결 `docs/AI.md`, 배포와 **알려진 한계(확인한 수치 포함)** `docs/DEPLOY.md`, 한글 캡션 조사 `docs/CAPTION.md`.
+"AllDoc"은 임시 이름이다. 라이선스는 AGPL-3.0. 제품 명세 `docs/SPEC.md`, 화면 규칙 `docs/DESIGN.md`, AI 연결 `docs/AI.md`, 배포와 **알려진 한계(확인한 수치 포함)** `docs/DEPLOY.md`, 한글 캡션 조사 `docs/CAPTION.md`, 제품화(계정·요금제·결제) 계획 `docs/PRODUCT.md`, LaTeX 편집 설계 `docs/LATEX.md`(둘 다 아직 구현 전).
 
 ## 작업 규칙
 - 사용자에게 보이는 글은 모두 한국어로 쓴다: 답변, 화면 문구, 문서, 오류 메시지, 시험 이름, 커밋 메시지.
