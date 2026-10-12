@@ -18,6 +18,7 @@
   "dependencies": {
     "@alldoc/shared": "^0.1.0",
     "@fontsource-variable/noto-sans-kr": "^5.3.0",
+    "@hocuspocus/provider": "^2.15.3",
     "@rhwp/core": "^0.8.6",
     "@rhwp/editor": "^0.8.6",
     "dompurify": "^3.4.16",
@@ -27,7 +28,8 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-router-dom": "^7.18.4",
-    "superdoc": "^2.19.1",
+    "superdoc": "1.47.2",
+    "yjs": "^13.6.33",
     "zod": "^4.6.5",
     "zustand": "^5.0.15"
   },

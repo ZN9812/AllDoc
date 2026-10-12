@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { SuperDoc } from 'superdoc';
+import { createSuperDocUI, type SuperDocUI } from 'superdoc/ui';
 import 'superdoc/style.css';
 import { areaLabel, KIND_MIME, type AreaPlace } from '@alldoc/shared';
 import { describeLoadFailure } from './docx/errors';
@@ -29,9 +30,13 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
     let alive = true;
     let ready = false;
     let sd: SuperDoc | null = null;
+    // 화면 위치 계산(getRect·scrollIntoView·observe)을 맡는 SuperDoc 의 UI 도구. 편집기가 준비되면 만든다.
+    let ui: SuperDocUI | null = null;
 
     const toolbar = document.createElement('div');
     toolbar.className = 'docx-toolbar';
+    // SuperDoc 1.x 는 도구줄 자리를 CSS 선택자(문자열)로만 받는다.
+    toolbar.id = `docx-toolbar-${Math.random().toString(36).slice(2)}`;
     toolsHost.appendChild(toolbar);
 
     const fail = (message: string) => {
@@ -53,15 +58,16 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
     const addressOf = (sp: Span) => ({ kind: 'text' as const, blockId: sp.blockId, range: { start: sp.start, end: sp.end }, ...(sp.story ? { story: sp.story } : {}) });
 
     const paint = () => {
-      const ui = sd?.ui;
-      if (!ui || !alive) return;
+      const view = ui?.viewport;
+      if (!view || !alive) return;
       const origin = layer.getBoundingClientRect();
       const frag = document.createDocumentFragment();
       const draw = (list: Span[], kind: 'pending' | 'focus') => {
         for (const sp of list) {
-          const res = ui.viewport.getRect({ target: addressOf(sp) });
+          const res = view.getRect({ target: addressOf(sp) });
           // 화면 밖의 쪽은 그려져 있지 않아 찾을 수 없다. 스크롤하면 편집기가 알려 주므로 그때 다시 그린다.
-          if (!res.found) continue;
+          // SuperDoc 1.x 는 머리말·꼬리말·각주·미주 안의 글 범위는 찾지 못한다(본문만 된다).
+          if (!res.success) continue;
           for (const r of res.rects) {
             const box = document.createElement('div');
             box.className = `docx-hl-box ${kind}`;
@@ -98,10 +104,10 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
         if (!blocks && readBlocks) blocks = await readBlocks();
         const sp = blocks ? resolveSpans([t], blocks)[0] : undefined;
         if (!sp || !alive) return;
-        const moved = await sd?.ui.viewport.scrollIntoView({ target: addressOf(sp), block: 'center', behavior: 'smooth' });
+        const moved = await ui?.viewport.scrollIntoView({ target: addressOf(sp), block: 'center', behavior: 'smooth' });
         // 머리말·꼬리말·각주·미주 안의 글은 편집기가 그 자리로 이동하지 못할 수 있다(그 쪽이 화면에 그려져 있지 않을 때 등). 그러면 헤매지 않게 알려 준다.
         const area = blocks?.[t.paragraph]?.area;
-        if (area && moved?.success !== true && sd?.ui.viewport.getRect({ target: addressOf(sp) }).found !== true) {
+        if (area && moved?.success !== true && ui?.viewport.getRect({ target: addressOf(sp) }).success !== true) {
           const where = placeOf ? areaLabel(placeOf(area)) : '머리말·꼬리말·각주';
           callbacks.current.onNotice?.(`이 글은 ${where}에 있어요. Word 편집기가 그 자리로 바로 이동하지 못했어요. 해당 쪽을 열어 직접 찾아 주세요.`);
         }
@@ -119,11 +125,10 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
         zoom: { mode: 'fit-width', fitWidth: { max: 100, padding: 16 } },
         // 문서를 열 때 SuperDoc 쪽으로 가는 통계 전송을 끈다. 문서 내용은 이 브라우저 밖으로 나가지 않아야 한다.
         telemetry: { enabled: false },
-        ui: {
-          toolbar: { container: toolbar, excludeItems: [...TOOLBAR_EXCLUDE], strings: TOOLBAR_STRINGS, overflow: 'menu', responsiveTo: 'container' },
-          search: true,
+        modules: {
+          toolbar: { selector: `#${toolbar.id}`, excludeItems: [...TOOLBAR_EXCLUDE], texts: { ...TOOLBAR_STRINGS }, responsiveToContainer: true },
           // 댓글은 옆 칸을 만들지 않고 쪽 위에 겹쳐 보인다(옆 칸이 생기면 쪽이 줄어들거나 오른쪽이 잘린다).
-          comments: { layout: 'inline' },
+          comments: { displayMode: 'inline' },
         },
         onReady: ({ superdoc }) => {
           if (!alive) return;
@@ -170,7 +175,8 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
             reveal: (t) => void reveal(t),
           };
           // 쪽이 그려지거나 스크롤·확대·다시 배치가 있을 때마다 편집기가 알려 준다 → 고칠 곳을 다시 그린다.
-          off = superdoc.ui.viewport.observe(paint);
+          ui = createSuperDocUI({ superdoc });
+          off = ui.viewport.observe(paint);
           ready = true;
           callbacks.current.onReady(handle);
         },
@@ -195,6 +201,8 @@ export default function DocxEngine({ doc, toolsHost, onReady, onDirty, onPages, 
     return () => {
       alive = false;
       off?.();
+      ui?.destroy();
+      ui = null;
       layer.replaceChildren();
       try {
         sd?.destroy();

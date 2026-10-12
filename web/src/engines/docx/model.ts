@@ -1,4 +1,4 @@
-// DOCX 문서의 읽기와 변경. SuperDoc 의 문서 API(extract·replace·format·paragraphs)로 고치고,
+// DOCX 문서의 읽기와 변경. SuperDoc 의 문서 API(extract·replace·format·format.paragraph)로 고치고,
 // 글꼴·크기 같은 서식은 내보낸 DOCX 의 XML 에서 읽는다(styles.ts).
 //
 // 문단 번호: extract() 가 돌려주는 본문 블록 목록에서의 순서(0부터, 표 안의 문단과 글상자 안의 문단 포함) 뒤에,
@@ -29,8 +29,7 @@ export interface DocxHost {
   doc: {
     extract(input: Record<string, never>): Promise<{ blocks: BlockLike[]; revision: string }>;
     replace(input: unknown): Promise<Receipt>;
-    format: { apply(input: unknown): Promise<Receipt> };
-    paragraphs: { setAlignment(input: unknown): Promise<Receipt>; setSpacing(input: unknown): Promise<Receipt> };
+    format: { apply(input: unknown): Promise<Receipt>; paragraph: { setAlignment(input: unknown): Promise<Receipt>; setSpacing(input: unknown): Promise<Receipt> } };
   } & AreaApi;
   exportDocx(): Promise<Blob>;
 }
@@ -408,11 +407,11 @@ export class DocxModel {
     }
 
     if (st.align !== undefined) {
-      const r = await this.host.doc.paragraphs.setAlignment({ target: address, alignment: st.align });
+      const r = await this.host.doc.format.paragraph.setAlignment({ target: address, alignment: st.align });
       if (!r.success) return failed(r.failure?.message ?? 'Word 편집기가 정렬을 바꾸지 못했어요.');
     }
     if (st.lineSpacingPct !== undefined) {
-      const r = await this.host.doc.paragraphs.setSpacing({ target: address, line: Math.round(st.lineSpacingPct * 2.4), lineRule: 'auto' });
+      const r = await this.host.doc.format.paragraph.setSpacing({ target: address, line: Math.round(st.lineSpacingPct * 2.4), lineRule: 'auto' });
       if (!r.success) return failed(r.failure?.message ?? 'Word 편집기가 줄 간격을 바꾸지 못했어요.');
     }
     if (before) before.para = { ...before.para, ...st };

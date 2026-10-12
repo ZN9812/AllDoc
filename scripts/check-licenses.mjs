@@ -24,11 +24,20 @@ const PERMISSIVE = new Set([
 
 /** 눈여겨봐야 하지만 의도해서 쓰는 것. 이유를 적어 둔다(THIRD_PARTY_NOTICES.md 참고). */
 const REVIEWED = {
-  superdoc: 'AGPL-3.0. 이 저장소를 AGPL-3.0-only 로 공개하는 이유 중 하나. 별도 상용 계약으로 쓸 수도 있다.',
-  '@superdoc/docx-engine': '독점(Proprietary) 라이선스. SuperDoc 의 의존성이며 운영 전에 라이선스 확인이 필요하다(THIRD_PARTY_NOTICES.md).',
+  superdoc: 'AGPL-3.0. 이 저장소를 AGPL-3.0-only 로 공개하는 이유 중 하나. 독점 엔진(@superdoc/docx-engine)에 의존하지 않는 1.x 를 쓴다.',
 };
 
-const tree = JSON.parse(execSync('npm ls --omit=dev --all --json --long', { maxBuffer: 1 << 29, stdio: ['ignore', 'pipe', 'ignore'] }).toString());
+// npm ls 는 의존성 불일치가 있으면 실패 코드로 끝나도 목록은 그대로 낸다. superdoc 1.x 가 선택적 동료 의존성으로 적은 pdfjs-dist 5.x 와
+// 이 앱의 6.x 가 맞지 않아(.npmrc 참고) 늘 실패 코드가 나므로, 목록을 받았으면 그대로 쓴다.
+const npmLs = () => {
+  try {
+    return execSync('npm ls --omit=dev --all --json --long', { maxBuffer: 1 << 29, stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+  } catch (e) {
+    if (e.stdout?.length) return e.stdout.toString();
+    throw e;
+  }
+};
+const tree = JSON.parse(npmLs());
 const found = new Map();
 (function walk(deps) {
   for (const [name, d] of Object.entries(deps ?? {})) {
