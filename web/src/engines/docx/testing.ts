@@ -1,6 +1,6 @@
 // 시험 전용: SuperDoc 의 문서 API 를 흉내 내는 메모리 문서. 화면 코드에서는 쓰지 않는다.
 // 실제 편집기에서 확인한 동작을 따른다: 본문은 extract(), 머리말·꼬리말·각주·미주·글상자는 "이야기(story)" 를 지정해 blocks.list·find·getNode 로 읽고
-// replace·format(format.paragraph 포함) 에 같은 이야기를 적어 고친다. 이야기를 잘못 적으면(본문 문단에 이야기를 적거나, 머리말 문단에 빠뜨리면) 오류를 낸다.
+// replace·format·paragraphs 에 같은 이야기를 적어 고친다. 이야기를 잘못 적으면(본문 문단에 이야기를 적거나, 머리말 문단에 빠뜨리면) 오류를 낸다.
 // 글상자 안의 문단은 extract() 의 목록에도 나오지만(글상자를 단 문단 바로 다음) 본문 문단 주소로는 찾을 수 없고, 글상자 번호(tb0 …)로만 찾는다.
 // 글상자는 Word·LibreOffice 처럼 그림 방식과 옛 방식 두 벌로 저장되어, 편집기가 받아들이는 글상자 번호는 한 칸씩 건너뛴다(tb0 tb2 tb4 …).
 import type { Story } from './areas';
@@ -168,25 +168,25 @@ export class FakeDocx {
           }
           return { success: true };
         },
-        paragraph: {
-          setAlignment: async (input: unknown) => {
-            const { target, alignment } = input as { target: { nodeId: string; story?: Story }; alignment: 'left' | 'center' | 'right' | 'justify' };
-            const p = this.para(target.nodeId, target.story);
-            if (!this.ignore.has('align')) {
-              p.align = alignment === 'justify' ? 'both' : alignment;
-              this.rev++;
-            }
-            return { success: true };
-          },
-          setSpacing: async (input: unknown) => {
-            const { target, line } = input as { target: { nodeId: string; story?: Story }; line: number };
-            const p = this.para(target.nodeId, target.story);
-            if (!this.ignore.has('spacing')) {
-              p.linePct = Math.round(line / 2.4);
-              this.rev++;
-            }
-            return { success: true };
-          },
+      },
+      paragraphs: {
+        setAlignment: async (input: unknown) => {
+          const { target, alignment } = input as { target: { nodeId: string; story?: Story }; alignment: 'left' | 'center' | 'right' | 'justify' };
+          const p = this.para(target.nodeId, target.story);
+          if (!this.ignore.has('align')) {
+            p.align = alignment === 'justify' ? 'both' : alignment;
+            this.rev++;
+          }
+          return { success: true };
+        },
+        setSpacing: async (input: unknown) => {
+          const { target, line } = input as { target: { nodeId: string; story?: Story }; line: number };
+          const p = this.para(target.nodeId, target.story);
+          if (!this.ignore.has('spacing')) {
+            p.linePct = Math.round(line / 2.4);
+            this.rev++;
+          }
+          return { success: true };
         },
       },
 

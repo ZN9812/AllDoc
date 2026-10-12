@@ -9,7 +9,7 @@ FROM node:22-bookworm AS build
 WORKDIR /app
 
 # 의존성 설치는 소스보다 먼저 해서, 소스만 바뀐 빌드에서는 이 단계를 다시 쓰게 한다.
-COPY package.json package-lock.json .npmrc ./
+COPY package.json package-lock.json ./
 COPY shared/package.json shared/
 COPY web/package.json web/
 COPY server/package.json server/

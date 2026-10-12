@@ -21,7 +21,7 @@ LaTeX(논문) 편집 설계는 `docs/LATEX.md` 에 따로 있습니다. 구현�
 | AI 호출 | `server/src/ai/anthropic.ts` 가 응답의 `usage`(토큰)와 실제 응답 모델을 버림. 프롬프트 캐싱 없음. 진짜 API 호출은 시험하지 않음 | 요청 1회 원가를 모름 |
 | 문서 | 브라우저 IndexedDB 에만 저장. "서버는 문서를 저장하지 않습니다"(`docs/AI.md`) | 여러 기기·서버 컴파일과 충돌하는 약속 |
 | 보안 헤더 | 사이트 전체에 엄격한 CSP·COOP(`server/src/app.ts` `CONTENT_SECURITY_POLICY`) | 결제창 스크립트·팝업이 막힘 |
-| Word 엔진 | `@superdoc/docx-engine` 독점 라이선스. 상용 계약 없이는 평가·개발·시험만 허용, 경쟁 제품 조항(`THIRD_PARTY_NOTICES.md`) | 유료 운영 전에 계약하거나 Word 를 꺼야 함 |
+| Word 엔진 | `@superdoc/docx-engine` 독점 라이선스. 상용 계약 없이는 평가·개발·시험만 허용, 경쟁 제품 조항(`THIRD_PARTY_NOTICES.md`) | 유료 운영 전에 계약하거나 Word 를 꺼야 함. 엔진이 없는 1.x 로 바로 바꾸는 것은 안 됨(아래 "SuperDoc 1.x 시험") |
 
 ## 결제부터 만들어야 하나?
 
@@ -275,9 +275,34 @@ interface PaymentProvider {
 | 이용약관·환불정책 | 청약철회, 디지털 콘텐츠 예외는 사전에 분명히 알려야 함, 부가세 포함 가격 표시 | 초안 필요 |
 | 정기결제 | 전자상거래법 제13조 제6항(2025-02-14 시행): 정기결제 대금 인상·무료→유료 전환 때 추가 동의와 고지. 다크패턴 규제(숨은 갱신, 해지 방해 등). 고지 기간은 미확인 | 이용권부터 시작해 부담을 줄임 |
 | 개인정보처리방침 | 수집 항목(구글 이메일·이름), 처리 위탁(호스팅·PG), **국외 이전**(문서 글을 미국 Anthropic 으로 보냄: 항목·시기·방법·보관), 보관·파기, 만 14세 미만 처리 | 초안 필요 |
-| SuperDoc | 상용 계약 또는 Word 끄고 출시 | 문의 전 |
+| SuperDoc | 상용 계약 또는 Word 끄고 출시. 1.x(AGPL 전용)로 그대로 바꾸는 것은 시험에서 막힘(아래) | 문의 전 |
 | 상표·이름 | "AllDoc" 은 임시 이름(비슷한 이름의 앱이 있음). KIPRIS 검색 | 미진행 |
 | AGPL | 서비스 이용자에게 소스 제공(`VITE_SOURCE_URL`). 남이 같은 코드로 서비스할 수 있음을 전제로 함. 외부 기여를 받기 전에 기여 동의서(CLA) 여부 결정 | 결정 필요 |
+
+## SuperDoc 1.x(AGPL 전용) 시험 — 2026-10-12, 결론: 그대로는 바꿀 수 없음
+
+독점 엔진에 의존하지 않는 `superdoc@1.47.2`(dist-tag `legacy`, `license: AGPL-3.0`)로 바꿀 수 있는지 시험했다. 바꿔 본 코드는 브랜치 `claude/superdoc-1x-trial` 의 커밋 a504fbb 에 있고, 다음 커밋에서 되돌렸다. 독점 엔진의 코드는 열어 보지 않았다(1.x 에는 설치되지 않는다).
+
+**좋은 점(확인함).** lockfile 과 빌드 결과에 `@superdoc/docx-engine` 이 없고, 라이선스 검사에서 독점(Proprietary) 항목이 사라진다. 빌드 결과 `web/dist/assets` 는 46.6MiB(48,894,795바이트. 2.x 는 `docs/DEPLOY.md` 의 약 121MB. 2.x 는 엔진을 설치하지 않으려고 이번에 다시 재지 않았다). 단위 시험(본문 흉내 문서)·corpus 시험은 통과한다.
+
+**바꾸면 되는 차이(코드로 고쳐 봄).**
+- 화면 설정: `ui.toolbar` → `modules.toolbar`(자리는 CSS 선택자 문자열만), `ui.comments.layout` → `modules.comments.displayMode`, 도구 id·문구 키가 camelCase(`documentMode`, `acceptTrackedChangeBySelection`, `fontFamily` 등). `ToolbarItemId`·`ToolbarStringId` 타입은 없다.
+- `superdoc.ui.viewport` → `createSuperDocUI({ superdoc }).viewport`(`superdoc/ui`). `getRect` 결과는 `found` 대신 `success`.
+- `doc.paragraphs.setAlignment·setSpacing` → `doc.format.paragraph.*`.
+- 설치: 1.x 가 `pdfjs-dist@^5` 를 선택적 동료 의존성으로 적어 이 앱의 6.x 와 충돌한다(1.x 는 pdfjs 를 불러오지 않음). npm `overrides` 로는 풀리지 않아 `.npmrc` 에 `legacy-peer-deps=true` 를 두고, 1.x 가 실제로 불러오는 `yjs`·`@hocuspocus/provider` 를 직접 적어야 했다. `npm ls` 도 실패 코드를 낸다.
+
+**막힌 점(Word 종단 시험 48개 중 31개 실패).** 실제 편집기에서 문서 API 를 직접 불러 확인한 것:
+- 글상자: `replace` 가 "Textbox stories are not supported by the v1 document-api runtime" 로 거절한다. 게다가 `blocks.list` 에 글상자 이야기를 주면 오류 없이 **본문 문단**을 돌려줘서, 지금 코드는 본문 문단을 글상자로 잘못 잡는다(카드에 "글상자 300"). 1.x 에서는 글상자 기능을 끌 수밖에 없다.
+- 머리말·꼬리말·각주·미주: `blocks.list` 가 이야기를 무시하고 본문을 돌려준다(`find`·`getNode` 는 이야기를 따른다). 이야기를 선택 범위 안에 적으면 `replace` 가 "target must be a SelectionTarget object" 로 거절하고, `in` 에만 적으면 머리말 글이 바르게 바뀐다.
+- 머리말 이야기로 부른 `format.paragraph.setAlignment`·`setSpacing` 은 성공을 돌려주면서 실제로는 **본문의 같은 번호 문단**(머리말 첫 문단과 본문 첫 문단이 둘 다 `00000001`)을 바꾼다. 내보낸 파일에서 본문 첫 문단의 줄 간격이 200% 로 바뀐 것을 확인했다. 본문 밖 문단의 정렬·줄 간격 변경은 막아야 한다.
+- 고칠 곳 강조 상자: 1.x 타입 설명에 `getRect` 의 글 범위는 본문만 된다고 적혀 있다(머리말·각주 안 강조는 나오지 않는다. 실행으로는 확인하지 않음).
+- 글자 크기: `format.apply` 에 `fontSize` 만 주면 그 글의 기존 글꼴(`w:rFonts`)이 지워지고, 기본 크기(10pt)로 바꿀 때는 크기 표기도 빠진다. 굵게만 줄 때와 글꼴·크기를 함께 줄 때는 기존 서식이 남는다. 서식 점검·내 규칙의 크기 변경이 글꼴을 바꿔 버리는 셈이다.
+- 깨진 파일: 1.x 의 오류 알림 모양이 달라 "Word(DOCX) 문서가 아니거나 깨져 있어요" 안내가 나오지 않는다(원인 미조사).
+- 본문 밖 API 를 숨기고(본문·표만 다루게) 본문 시험(`docx.spec`·`docx-table.spec`·휴대폰) 26개를 돌리면 21개 통과, 5개 실패(글자 크기 문제 4, 깨진 파일 안내 1).
+
+**1.x 로 가려면 할 일(하지 않음).** 글상자 기능 끄기, 본문 밖 문단 읽기를 `find` 로 바꾸고 `replace`·`format.apply` 는 `in` 만 쓰기, 본문 밖 문단 서식 막기, 크기를 바꿀 때 글꼴을 함께 보내기(효과 미확인), 깨진 파일 안내 고치기, 안내문(`web/src/editor/coverage.ts`)·AI 프롬프트·문서에서 글상자·머리말 서식 지원을 빼기. 이는 기능을 줄이는 결정이라 사용자가 정한다.
+
+**확인하지 못한 것.** 1.x 로 고친 파일을 Microsoft Word·한컴오피스에서 열기, 1.x 의 공식 유지 기간(레지스트리상 1.47.0 9월, 1.47.1 10-02, 1.47.2 10-08 로 2.x 와 나란히 나오고 있으나 언제까지인지는 찾지 못함), 1.x 를 쓰면 2.x 의 새 기능·수정을 받지 못하는 정도.
 
 ## 큰 위험과 대응
 
@@ -285,7 +310,7 @@ interface PaymentProvider {
 | --- | --- |
 | AI 원가가 구독료를 넘음 | 원장, 글자 상한, 일·월 한도, 숨은 원가 상한, 전체 비용 차단기, 콘솔 지출 한도, 캐싱, 보내는 범위 선택. 모델·추론 강도 변경은 사용자가 결정 |
 | 무료 계정 대량 생성 | 탈퇴 표식, IP 기준 요청 제한(로그인·컴파일), 필요하면 추가 확인 |
-| SuperDoc 라이선스 | 계약 전까지 유료 배포는 `VITE_DISABLE_DOCX=1`. 경쟁 제품 조항 때문에 계약이 안 될 수도 있음 |
+| SuperDoc 라이선스 | 계약 전까지 유료 배포는 `VITE_DISABLE_DOCX=1`. 경쟁 제품 조항 때문에 계약이 안 될 수도 있음. 1.x(AGPL 전용)는 글상자·머리말 서식을 잃고 글자 크기 버그를 피해 가야 해서 그대로는 대안이 아님 |
 | 컴파일 서버 탈출·자원 고갈 | `docs/LATEX.md` 의 이중 격리와 탈출 시험 |
 | 서버 한 대 한계 | 컴파일 일꾼은 처음부터 분리. 앱은 SQLite·메모리 잠금 때문에 1프로세스 전제(Postgres 로 옮기는 조건으로 기록) |
 | 개인정보 약속과 실제가 어긋남 | 서버 컴파일·서버 저장을 넣는 변경에서 동의 안내·처리방침·`docs/AI.md`·`docs/DEPLOY.md`·README 를 함께 고침 |
@@ -294,7 +319,7 @@ interface PaymentProvider {
 ## 사용자가 정할 것
 
 1. 사업자등록 시점, PG(토스 직접 또는 포트원), Paddle 을 알아볼지
-2. 유료 판매를 Word 없이 시작할지, SuperDoc 계약을 기다릴지
+2. 유료 판매를 Word 없이 시작할지, SuperDoc 계약을 기다릴지, 기능을 줄여 SuperDoc 1.x(AGPL 전용)로 갈지(위 "SuperDoc 1.x 시험")
 3. 무료 사용자에게 컴파일을 줄지, 준다면 시간 제한(E1 측정 뒤)
 4. 작업·요금제별 모델과 추론 강도(M0 원가 자료를 본 뒤)
 5. 첫 유료 상품: 이용권(권장) 또는 월 자동결제
