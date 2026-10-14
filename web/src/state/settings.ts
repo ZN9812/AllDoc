@@ -27,10 +27,12 @@ interface Persisted {
   aiEnabled: boolean;
   /** "문서 내용이 AI 서비스로 전송됩니다" 안내에 동의한 시각 */
   aiConsentAt: number | null;
+  /** "컴파일하려면 프로젝트 파일이 서버로 전송됩니다" 안내를 확인한 시각 */
+  compileNoticeAt: number | null;
 }
 
 function readPersisted(): Persisted {
-  const fallback: Persisted = { aiEnabled: true, aiConsentAt: null };
+  const fallback: Persisted = { aiEnabled: true, aiConsentAt: null, compileNoticeAt: null };
   const raw = readLS(SETTINGS_KEY);
   if (!raw) return fallback;
   try {
@@ -38,6 +40,7 @@ function readPersisted(): Persisted {
     return {
       aiEnabled: typeof v.aiEnabled === 'boolean' ? v.aiEnabled : true,
       aiConsentAt: typeof v.aiConsentAt === 'number' ? v.aiConsentAt : null,
+      compileNoticeAt: typeof v.compileNoticeAt === 'number' ? v.compileNoticeAt : null,
     };
   } catch {
     return fallback;
@@ -55,12 +58,13 @@ interface SettingsState extends Persisted {
   setAiEnabled: (on: boolean) => void;
   giveConsent: () => void;
   revokeConsent: () => void;
+  ackCompileNotice: () => void;
 }
 
 export const useSettings = create<SettingsState>((set, get) => {
   const save = () => {
-    const { aiEnabled, aiConsentAt } = get();
-    writeLS(SETTINGS_KEY, JSON.stringify({ aiEnabled, aiConsentAt }));
+    const { aiEnabled, aiConsentAt, compileNoticeAt } = get();
+    writeLS(SETTINGS_KEY, JSON.stringify({ aiEnabled, aiConsentAt, compileNoticeAt }));
   };
   return {
     ...readPersisted(),
@@ -79,6 +83,10 @@ export const useSettings = create<SettingsState>((set, get) => {
     },
     revokeConsent: () => {
       set({ aiConsentAt: null });
+      save();
+    },
+    ackCompileNotice: () => {
+      set({ compileNoticeAt: Date.now() });
       save();
     },
   };

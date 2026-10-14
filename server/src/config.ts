@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { AUTH_MODES, MAX_DOC_CHARS, PlanSchema, type AiMode, type AuthMode, type Plan } from '@alldoc/shared';
+import { AUTH_MODES, DEFAULT_COMPILE_LIMITS, MAX_DOC_CHARS, PlanSchema, type AiMode, type AuthMode, type Plan } from '@alldoc/shared';
 import { buildSystemPrompt } from './ai/prompt';
 
 export class ConfigError extends Error {
@@ -61,6 +61,24 @@ export interface Config {
   aiDailyBudgetMicroUsd: number | null;
   /** 동의를 받아야 하는 약관 판과 전문 주소. null 이면 동의를 받지 않는다(자체 설치 기본) */
   terms: { version: string; termsUrl: string; privacyUrl: string } | null;
+  /** LaTeX 컴파일. null 이면 끔(COMPILER=off, 기본) */
+  compiler: CompilerSettings | null;
+}
+
+export const COMPILER_MODES = ['off', 'mock', 'http'] as const;
+
+export interface CompilerSettings {
+  mode: 'mock' | 'http';
+  /** http: 일꾼 주소 목록(COMPILER_URLS, 쉼표로 구분) */
+  urls: string[];
+  /** http: 요청 서명 비밀값(COMPILER_SECRET, 32자 이상) */
+  secret: string;
+  /** 동시에 돌리는 컴파일 수(서버 전체) */
+  concurrency: number;
+  /** 기다릴 수 있는 컴파일 수(서버 전체). 넘으면 503 busy */
+  queue: number;
+  /** 올린 파일을 마지막 사용 뒤 며칠 두는지 */
+  retentionDays: number;
 }
 
 export const PlansFileSchema = z
@@ -95,6 +113,12 @@ const EnvSchema = z.object({
   BACKUP_DIR: z.string().optional(),
   BACKUP_KEEP: z.coerce.number().int().min(0).max(3650).default(14),
   WEB_DIST: z.string().optional(),
+  COMPILER: z.enum(COMPILER_MODES).default('off'),
+  COMPILER_URLS: z.string().optional(),
+  COMPILER_SECRET: z.string().optional(),
+  COMPILER_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(2),
+  COMPILER_QUEUE: z.coerce.number().int().min(0).max(1000).default(10),
+  TEX_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(7),
   ALLOWED_ORIGINS: z.string().optional(),
 });
 
@@ -252,7 +276,7 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
   // 요금제 파일
   let plans: Config['plans'] = {
     defaultPlanId: 'free',
-    list: [{ id: 'free', name: '무료', limits: { aiRequestsPerDay: env.DAILY_AI_LIMIT, aiRequestsPerMonth: null, aiMaxDocChars: MAX_DOC_CHARS, aiCostCapMicroUsdPerMonth: null } }],
+    list: [{ id: 'free', name: '무료', limits: { aiRequestsPerDay: env.DAILY_AI_LIMIT, aiRequestsPerMonth: null, aiMaxDocChars: MAX_DOC_CHARS, aiCostCapMicroUsdPerMonth: null, ...DEFAULT_COMPILE_LIMITS } }],
   };
   if (env.PLANS_CONFIG_PATH) {
     try {
@@ -267,6 +291,36 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
     } catch (e) {
       problems.push(`요금제 파일(${env.PLANS_CONFIG_PATH})을 읽지 못했어요: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  // LaTeX 컴파일
+  let compiler: Config['compiler'] = null;
+  if (env.COMPILER !== 'off') {
+    const urls = (env.COMPILER_URLS ?? '')
+      .split(',')
+      .map((u) => u.trim())
+      .filter(Boolean);
+    if (env.COMPILER === 'http') {
+      if (urls.length === 0) problems.push('COMPILER=http 에는 컴파일 일꾼 주소 COMPILER_URLS 가 필요해요. 예: http://compiler:8790');
+      for (const u of urls) {
+        try {
+          new URL(u);
+        } catch {
+          problems.push(`COMPILER_URLS: "${u}" 은(는) 올바른 주소가 아니에요.`);
+        }
+      }
+      if (!env.COMPILER_SECRET || env.COMPILER_SECRET.length < 32) problems.push('COMPILER=http 에는 32자 이상의 COMPILER_SECRET 이 필요해요(일꾼과 같은 값).');
+    } else if (production) {
+      console.warn('경고: COMPILER=mock 은 실제 TeX 가 아닌 데모 컴파일러예요.');
+    }
+    compiler = {
+      mode: env.COMPILER,
+      urls,
+      secret: env.COMPILER_SECRET ?? '',
+      concurrency: env.COMPILER_CONCURRENCY,
+      queue: env.COMPILER_QUEUE,
+      retentionDays: env.TEX_RETENTION_DAYS,
+    };
   }
 
   if (problems.length > 0) throw new ConfigError(problems);
@@ -300,5 +354,6 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
     plans,
     aiDailyBudgetMicroUsd: env.AI_DAILY_BUDGET_USD ? Math.round(env.AI_DAILY_BUDGET_USD * 1_000_000) : null,
     terms: env.TERMS_VERSION && env.TERMS_URL && env.PRIVACY_URL ? { version: env.TERMS_VERSION, termsUrl: env.TERMS_URL, privacyUrl: env.PRIVACY_URL } : null,
+    compiler,
   };
 }

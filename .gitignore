@@ -25,3 +25,7 @@ e2e/.data-terms/
 # 빌드 전에 준비하는 한글 편집기(rhwp-studio)와 그 소스 캐시
 web/public/rhwp-studio/
 .cache/
+
+# 빌드 전에 묶는 LaTeX 템플릿(templates/latex)
+web/public/templates/
+e2e/.data-tex/

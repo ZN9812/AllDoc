@@ -1,10 +1,11 @@
 // 탈퇴 처리. 화면(POST /api/account/delete)과 관리자 CLI 가 같이 쓴다.
-// 순서(docs/PRODUCT.md "탈퇴와 보관"): 계정의 이메일·이름 지우기와 세션 무효화 → 수동 부여 회수 → 원장 가명화 → 관리 기록.
+// 순서(docs/PRODUCT.md "탈퇴와 보관"): 계정의 이메일·이름 지우기와 세션 무효화 → 수동 부여 회수 → 원장(AI·컴파일) 가명화 → 컴파일하려고 올린 파일 기록 지우기 → 관리 기록.
 // 하루·월 사용 횟수 기록(usage)은 지우지 않는다: 탈퇴 뒤 같은 계정으로 다시 가입해 무료 한도를 되돌리지 못하게 하려는 것이며, 62일 뒤 자동으로 지워진다.
 import { createHmac } from 'node:crypto';
 import type { AuditLog } from '../audit';
 import type { EntitlementStore } from '../billing/entitlements';
 import type { LedgerStore } from '../ledger';
+import type { TexStore } from '../tex/store';
 import type { AccountStore } from './accounts';
 
 /** 원장에 남길 가명. 같은 사용자는 같은 가명이 되지만 원래 번호로 되돌릴 수 없다(비밀값이 있어야 계산 가능). */
@@ -16,6 +17,8 @@ export interface DeletionDeps {
   accounts: AccountStore;
   entitlements: EntitlementStore;
   ledger?: LedgerStore;
+  /** 컴파일 저장소. 이 사용자가 올린 파일 기록과 PDF를 지운다(파일 자체는 아무도 쓰지 않게 되면 다음 정리 때 지워진다) */
+  tex?: TexStore;
   audit: AuditLog;
   secret: string;
 }
@@ -27,8 +30,9 @@ export function deleteAccount(d: DeletionDeps, userId: string, actor: string, no
     d.entitlements.revoke(userId);
     const alias = deletedAlias(userId, d.secret);
     const ledgerRows = d.ledger?.pseudonymize(userId, alias) ?? 0;
+    const texBlobs = d.tex?.forgetUser(userId) ?? 0;
     // 관리 기록에도 원래 번호 대신 가명을 남긴다.
-    d.audit.record({ at: now, actor: actor === userId ? alias : actor, action: 'account.delete', target: alias, detail: JSON.stringify({ ledgerRows }) });
+    d.audit.record({ at: now, actor: actor === userId ? alias : actor, action: 'account.delete', target: alias, detail: JSON.stringify({ ledgerRows, texBlobs }) });
     return { ledgerRows };
   });
 }

@@ -1,7 +1,7 @@
 // AI 사용량 원장. 요청마다 토큰과 원가를 한 줄씩 남겨 기능별 원가(p50/p95)를 계산하는 데 쓴다.
 // 문서 글·지시문·응답 글은 남기지 않는다(docs/AI.md 의 약속). 남기는 것은 숫자와 모델 이름뿐이다.
 import type { DatabaseSync } from 'node:sqlite';
-import type { AiMode } from '@alldoc/shared';
+import type { AiMode, TexEngine } from '@alldoc/shared';
 import { costOf } from './ai/pricing';
 import type { ProviderUsage } from './ai/types';
 
@@ -25,6 +25,25 @@ export interface AiEventInput {
   dropped: number;
   ms: number;
   outcome: AiOutcome;
+}
+
+/** ok·error·timeout: 컴파일함 · too_large: 크기 상한 · busy: 대기열이 꽉 참 · cached: 이미 만든 결과를 돌려줌 · failed: 일꾼 문제 */
+export type CompileOutcome = 'ok' | 'error' | 'timeout' | 'too_large' | 'busy' | 'cached' | 'failed';
+
+export interface CompileEventInput {
+  at: number;
+  day: string;
+  userId: string | null;
+  planId: string | null;
+  engine: TexEngine;
+  wallMs: number;
+  outcome: CompileOutcome;
+  projectBytes: number;
+  files: number;
+  /** 이번 컴파일 전에 새로 올린 바이트(같은 파일을 다시 올리지 않는지 보려고) */
+  uploadedBytes: number;
+  pdfBytes: number | null;
+  texlive: string | null;
 }
 
 export interface CostSummaryRow {
@@ -69,9 +88,31 @@ export class LedgerStore {
     this.dayCostStmt = this.db.prepare('SELECT COALESCE(SUM(cost_micro_usd), 0) AS n FROM ai_events WHERE day = ?');
   }
 
-  /** 탈퇴: 그 사용자의 줄을 가명으로 바꾼다. 통계는 남고 신원은 사라진다. 바꾼 줄 수를 돌려준다. */
+  /** 탈퇴: 그 사용자의 줄(AI·컴파일 원장)을 가명으로 바꾼다. 통계는 남고 신원은 사라진다. 바꾼 줄 수를 돌려준다. */
   pseudonymize(userId: string, alias: string): number {
-    return Number(this.db.prepare('UPDATE ai_events SET user_id = ? WHERE user_id = ?').run(alias, userId).changes);
+    const ai = Number(this.db.prepare('UPDATE ai_events SET user_id = ? WHERE user_id = ?').run(alias, userId).changes);
+    const compile = Number(this.db.prepare('UPDATE compile_events SET user_id = ? WHERE user_id = ?').run(alias, userId).changes);
+    return ai + compile;
+  }
+
+  /** 컴파일 한 번을 남긴다. 파일 이름·내용은 남기지 않는다. */
+  recordCompile(e: CompileEventInput): void {
+    this.db
+      .prepare(
+        `INSERT INTO compile_events (at, day, user_id, plan_id, engine, wall_ms, outcome, project_bytes, files, uploaded_bytes, pdf_bytes, texlive)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(e.at, e.day, e.userId, e.planId, e.engine, e.wallMs, e.outcome, e.projectBytes, e.files, e.uploadedBytes, e.pdfBytes, e.texlive);
+  }
+
+  /** 하루 한도에 세는 컴파일의 횟수와 시간 합. 일꾼이 실제로 돌린 것(ok·error·timeout)만 세고, 크기 초과·대기열 꽉 참·캐시·일꾼 문제는 세지 않는다. */
+  compileUsage(userId: string, day: string): { count: number; ms: number } {
+    const r = this.db
+      .prepare(
+        "SELECT COUNT(*) AS count, COALESCE(SUM(wall_ms), 0) AS ms FROM compile_events WHERE user_id = ? AND day = ? AND outcome IN ('ok', 'error', 'timeout')",
+      )
+      .get(userId, day) as { count: number; ms: number };
+    return { count: r.count, ms: r.ms };
   }
 
   /** 한 사용자의 기간 원가 합(마이크로달러). 월 원가 상한에 쓴다. */

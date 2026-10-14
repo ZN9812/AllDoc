@@ -1,13 +1,46 @@
 # LaTeX(논문) 편집 설계
 
 Overleaf 처럼 LaTeX 프로젝트를 편집하고, 서버에서 컴파일한 PDF 를 바로 보고, AI 가 고칠 곳을 **제안**하는 기능의 설계입니다.
-아직 구현한 것은 없습니다. 측정하기 전의 값(이미지 크기, 컴파일 시간 등)은 비워 두고 실험 뒤에 채웁니다.
+**M2(편집·컴파일, AI 없음)를 구현했습니다(2026-10-14).** 무엇을 만들었고 설계와 무엇이 다른지, 무엇을 확인하지 못했는지는 바로 아래 "구현 상태 (M2)" 에 있습니다. M3(AI)는 아직입니다. 측정하기 전의 값(이미지 크기 등)은 비워 둡니다.
 제품화 순서와 요금제는 `docs/PRODUCT.md` 를 봅니다.
 
 정해진 것:
 - 컴파일은 **서버**에서 합니다(브라우저 WASM 엔진은 쓰지 않음).
 - 첫 버전은 **혼자 쓰는 편집기**입니다(실시간 공동 편집은 나중).
 - AI 는 지금처럼 **제안 → 사용자가 적용** 방식입니다.
+
+## 구현 상태 (M2, 2026-10-14)
+
+**만든 것**
+- 문서 종류 `tex`(`shared/src/doc.ts`), IndexedDB 버전 2 와 `texFiles` 저장소(`web/src/lib/docs.ts`), ZIP 가져오기·내보내기와 안전 검사(`web/src/lib/texProject.ts`: `..`·절대 경로·심볼릭 링크·암호화 항목·latexmkrc 빼기, 파일 수·전체 크기 상한, 1MB 넘는 항목의 압축률 100배 초과면 거절).
+- 편집 화면(`web/src/engines/TexEngine.tsx`): 파일 목록(새 파일·올리기·이름 바꾸기·지우기·주 파일 정하기) | CodeMirror 원고(`web/src/engines/tex/cm.ts`) | PDF 미리보기(`web/src/engines/pdf/PdfView.tsx`, PDF 문서 보기와 같이 씀). 엔진·주 파일 고르기, `Ctrl/Cmd+S`·`Ctrl/Cmd+Enter` 컴파일, 휴대폰의 "파일 / 원고 / PDF" 전환, 처음 컴파일할 때 안내, 컴파일 탭(`web/src/editor/CompilePane.tsx`: 오류·경고 → 그 파일·줄로 이동, 원본 로그), 내려받기(프로젝트 ZIP·지금 연 .tex·마지막 PDF). 자동 저장은 엔진의 `persist()` 로 바뀐 파일만 씁니다.
+- 서버(`server/src/tex/`): 이 사용자가 올린 해시만 대조, 해시 다시 확인, 본인만 PDF, 사용자당 동시 1개, 서버 전체 동시 수·대기열(꽉 차면 503 + `Retry-After`), 요금제의 컴파일 한도(`compileTimeoutSec`·`compilesPerDay`·`compileSecondsPerDay`·`projectMaxBytes`), 한 시간 결과 캐시, `compile_events` 원장(마이그레이션 4), 보관 기간 뒤 정리, 탈퇴 시 기록 삭제·원장 가명화. `COMPILER=mock` 데모 컴파일러.
+- 로그 해석(`shared/src/tex/log.ts`): 이 기계에서 모은 실제 XeLaTeX 로그 3개와 BibTeX·Biber `.blg` 로 시험.
+- 템플릿 4개(`templates/latex/`), 컴파일 일꾼(`compiler/`: 서명 확인, 작업 검사, bubblewrap + prlimit + 시간 제한), 탈출 시험 12개(`compiler/test/escape/run.ts`), seccomp 프로필(`compiler/seccomp.json`), compose 의 `compiler` 서비스, CI `latex` 작업(`.github/workflows/latex.yml`).
+- 종단 시험: `e2e/tex.spec.ts`·`e2e/tex.phone.spec.ts`(데모 컴파일러), `e2e/tex-real.spec.ts`(`REQUIRE_TEXLIVE=1`, 진짜 일꾼).
+
+**설계와 다르게 한 것**
+- 앱 → 일꾼 요청은 tar 대신 **작업 묶음**(머리 JSON + 덩어리, `shared/src/tex/frame.ts`)으로 보내고, PDF 도 같은 응답에 담습니다(`GET /compile/:jobId/pdf` 없음). 일꾼은 응답을 보낸 뒤 바로 작업 폴더를 지웁니다.
+- 일꾼 이미지의 TeX Live 는 `install-tl` 연도 스냅숏이 아니라 **Debian bookworm 패키지(TeX Live 2022)** 입니다(결정 필요).
+- `DocMeta.project` 에 `bib` 는 두지 않았습니다. biber·bibtex 는 latexmk 가 고릅니다.
+- tex 는 M3 전까지 `isAiTarget` 이 거짓입니다(AI 대화 탭도 없음).
+- 오류가 있으면 TeX 가 만든 PDF 가 있어도 돌려주지 않습니다. 결과 캐시는 서버 메모리에만 있어 서버를 다시 켜면 사라집니다. 대기열 우선순위(`queuePriority`)는 없습니다(먼저 온 순서).
+- latexmk 는 `-cd` 로 주 파일이 있는 폴더에서 돌립니다(주 파일이 하위 폴더에 있어도 상대 경로가 맞도록). 안전한 `-r` 설정 파일은 쓰지 않습니다(`-norc` 만).
+
+**확인한 것**(이 환경에서 한 번 해 본 것이며 CI 에서는 돌지 않는다. CI 의 `latex` 작업이 같은 시험을 일꾼 이미지 안에서 돌리도록 해 두었다)
+- 이 기계(Ubuntu 24.04, TeX Live 2023 패키지, root)에서 일꾼을 직접 띄워: 탈출 시험 12개 통과, bwrap 을 끄면 1개, TeX 설정을 풀면 2개가 실패(두 겹이 따로 막음). `e2e/tex-real.spec.ts` 통과: ko-article 을 XeLaTeX 로 컴파일한 PDF 를 `pdftotext` 로 읽어 한글 구절 4개가 원문과 같았고, 넣은 `\undefinedmacro` 오류가 그 줄 번호로 나와 누르면 그 줄로 갔습니다(화면 캡처로 봄).
+- 데모 컴파일러로 종단 시험 5개(데스크톱 4, 휴대폰 1)와 기존 종단 시험 전체가 통과했습니다(수치는 커밋 메시지).
+
+**확인하지 못한 것**
+- 일꾼 **이미지 빌드와 컨테이너 안 실행**(Docker Hub 429 로 기본 이미지를 받지 못함). 이미지 크기. AppArmor 가 사용자 이름공간을 막는 서버, gVisor.
+- 한글 입력기(IME)로 원고에 한글 치기(데스크톱 크롬·사파리, 휴대폰). Playwright 는 입력기를 거치지 않습니다.
+- biber 원격 자료, 그림·참고문헌이 많은 실제 논문의 컴파일 시간, LuaLaTeX 의 첫 컴파일 시간(이미지에서 글꼴 캐시를 미리 만들게 했지만 재지 않음).
+- 탈출 시험의 "시간 제한 강제 종료"와 "메모리 상한"은 보호를 꺼서 실패하는지 보지 않았습니다(끄면 무한 반복이나 기계 메모리 고갈이 되어서).
+
+**사용자가 정할 것**
+- 컴파일 한도의 실제 값(지금은 임시: 60초, 횟수·시간 제한 없음, 50MB)과 무료 사용자에게 컴파일을 줄지, 보관 날 수(지금 7일).
+- 템플릿 라이선스(CC0 또는 MIT).
+- 일꾼 이미지의 TeX Live 출처(Debian 패키지 유지 또는 `install-tl` 연도 스냅숏).
 
 ## 완료 기준 (G3)
 
@@ -253,7 +286,7 @@ Overleaf 처럼 LaTeX 프로젝트를 편집하고, 서버에서 컴파일한 PD
 - **목록**: 직접 만든 것만 넣습니다(`templates/latex/{ko-article,ko-report,en-article,ko-beamer}/`). 빌드할 때 `web/public/templates/*.zip` 으로 묶습니다.
   - 한국어: XeLaTeX + kotex, 글꼴 명시
   - report: 장·목차·biblatex(biber)
-- **라이선스**: CC0 또는 MIT(사용자 결정). 사용자의 논문이 AGPL 문제에 얽히지 않게 합니다.
+- **라이선스**: CC0 또는 MIT(사용자 결정, **아직 정하지 않음**). 사용자의 논문이 AGPL 문제에 얽히지 않게 합니다.
 - **학교 학위논문 양식·로고는 넣지 않습니다**(라이선스·상표). 사용자가 직접 올려 쓸 수 있고, TeX Live 에 들어 있는 클래스는 그대로 됩니다.
 
 ## 실험 (구현 전에 먼저, CLAUDE.md 의 "코어를 직접 불러 실험" 원칙)

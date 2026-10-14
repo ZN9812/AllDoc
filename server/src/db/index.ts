@@ -34,6 +34,17 @@ export const MIGRATIONS: readonly string[] = [
     user_id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, valid_until INTEGER, note TEXT, created_at INTEGER NOT NULL, created_by TEXT NOT NULL);
    CREATE TABLE audit_log (id INTEGER PRIMARY KEY, at INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT, detail TEXT);
    CREATE INDEX ai_events_user_day ON ai_events (user_id, day);`,
+  // 4: LaTeX 컴파일 원장(파일 내용은 담지 않는다), 컴파일하려고 올린 파일과 그것을 올린 사용자
+  `CREATE TABLE compile_events (
+    id INTEGER PRIMARY KEY,
+    at INTEGER NOT NULL, day TEXT NOT NULL, user_id TEXT, plan_id TEXT,
+    engine TEXT NOT NULL, wall_ms INTEGER NOT NULL, outcome TEXT NOT NULL,
+    project_bytes INTEGER NOT NULL, files INTEGER NOT NULL, uploaded_bytes INTEGER NOT NULL, pdf_bytes INTEGER, texlive TEXT);
+   CREATE INDEX compile_events_user_day ON compile_events (user_id, day);
+   CREATE TABLE tex_blobs (hash TEXT PRIMARY KEY, size INTEGER NOT NULL, created_at INTEGER NOT NULL);
+   CREATE TABLE user_blobs (user_id TEXT NOT NULL, hash TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (user_id, hash));
+   CREATE INDEX user_blobs_hash ON user_blobs (hash);
+   CREATE INDEX user_blobs_at ON user_blobs (at);`,
 ];
 
 export function migrate(db: DatabaseSync): number {

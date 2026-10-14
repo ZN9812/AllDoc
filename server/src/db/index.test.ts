@@ -13,7 +13,7 @@ describe('데이터 파일 마이그레이션', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'alldoc-db-')), 'alldoc.sqlite');
     const db = openDb(file);
     expect(version(db)).toBe(MIGRATIONS.length);
-    expect(tables(db)).toEqual(['ai_events', 'audit_log', 'entitlement_overrides', 'usage', 'users']);
+    expect(tables(db)).toEqual(['ai_events', 'audit_log', 'compile_events', 'entitlement_overrides', 'tex_blobs', 'usage', 'user_blobs', 'users']);
     db.close();
     const again = openDb(file);
     expect(version(again)).toBe(MIGRATIONS.length);
@@ -30,6 +30,17 @@ describe('데이터 파일 마이그레이션', () => {
     expect(version(db)).toBe(MIGRATIONS.length);
     expect(db.prepare('SELECT count FROM usage').get()).toEqual({ count: 4 });
     db.close();
+  });
+
+  it('M1 까지의 파일(버전 3)에 4번(컴파일 원장·올린 파일)을 더해도 기존 기록이 남는다', () => {
+    const db = new DatabaseSync(':memory:');
+    for (let v = 0; v < 3; v++) db.exec(MIGRATIONS[v] as string);
+    db.exec('PRAGMA user_version = 3');
+    db.exec("INSERT INTO users (id, created_at, last_login_at) VALUES ('g:1', 1, 1)");
+    migrate(db);
+    expect(version(db)).toBe(4);
+    expect(db.prepare('SELECT id FROM users').all()).toEqual([{ id: 'g:1' }]);
+    expect(tables(db)).toContain('compile_events');
   });
 
   it('서버보다 새 버전의 파일은 열지 않는다', () => {

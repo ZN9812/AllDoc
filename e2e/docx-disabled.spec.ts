@@ -7,7 +7,7 @@ test.skip(process.env.VITE_DISABLE_DOCX !== '1', 'DOCX 지원을 끄고 빌드�
 
 test('DOCX 를 끄고 빌드하면 지원 형식 목록에서 빠지고, DOCX 파일은 안내와 함께 거절한다', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('.drop .s')).toHaveText('HWP · HWPX · PDF · TXT · MD');
+  await expect(page.locator('.drop .s')).toHaveText('HWP · HWPX · PDF · TXT · MD · LaTeX(TEX·ZIP)');
   expect(await page.getByTestId('file-input').getAttribute('accept')).not.toContain('.docx');
 
   await page.setInputFiles('[data-testid=file-input]', makeDocx());

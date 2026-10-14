@@ -4,7 +4,7 @@ import type { ConsistencyResult } from '../ai/consistency';
 import type { EngineHandle, HighlightState, HighlightTarget, PagesApi } from '../engines/types';
 import { toast } from '../state/toast';
 
-export type Tab = 'chat' | 'format' | 'changes';
+export type Tab = 'chat' | 'format' | 'changes' | 'compile';
 export type ItemStatus = 'pending' | 'applied' | 'dismissed' | 'stale' | 'failed';
 
 export interface ProposalItem {

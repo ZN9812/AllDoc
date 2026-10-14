@@ -52,6 +52,11 @@ export interface EngineHandle {
   reveal?(target: HighlightTarget): void;
   /** 방금 내려받은 저장본을 이 브라우저에 보관했음을 편집기에 알린다(편집기 안의 "저장 안 됨" 표시와 복구 임시본을 정리하는 데 쓴다). */
   markSaved?(): Promise<void>;
+  /**
+   * 자동 저장. 있으면 화면(EditorPage)이 getBlob + saveWorking 대신 이것을 부른다(LaTeX 프로젝트는 바뀐 파일만 저장한다).
+   * 부르는 즉시 저장할 내용을 잡아 두어야 한다(엔진이 닫힌 뒤에도 저장되도록).
+   */
+  persist?(): Promise<{ updatedAt: number }>;
 }
 
 export interface LoadedDoc {

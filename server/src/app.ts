@@ -29,6 +29,9 @@ import type { Config } from './config';
 import type { AiOutcome, LedgerStore } from './ledger';
 import { dayKey, quotaOf, type QuotaStore } from './quota';
 import { createStaticHandler } from './static';
+import type { CompilerClient } from './tex/client';
+import { compileInfo, registerTexRoutes } from './tex/routes';
+import type { TexStore } from './tex/store';
 
 export interface AppDeps {
   config: Config;
@@ -39,6 +42,9 @@ export interface AppDeps {
   providers: Providers;
   /** AI 사용량 원장. 없으면 남기지 않는다(시험 등). */
   ledger?: LedgerStore;
+  /** LaTeX 컴파일 일꾼 연결부와 올린 파일 저장소. 설정(COMPILER)이 켜져 있어도 없으면 컴파일 API 가 503 */
+  compiler?: CompilerClient;
+  tex?: TexStore;
   now?: () => Date;
   fetch?: typeof fetch;
   log?: (message: string, extra?: Record<string, unknown>) => void;
@@ -132,6 +138,8 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get('/api/health', (c) => c.json({ ok: true }));
 
+  const texDeps = { config, compiler: deps.compiler, store: deps.tex, ledger: deps.ledger, entitlements, userOf, needsAgreement, now, log };
+
   // ---- 내 정보 ----
   app.get('/api/me', (c) => {
     const user = userOf(c);
@@ -159,6 +167,7 @@ export function createApp(deps: AppDeps): Hono {
       agreement: config.terms
         ? { required: user !== null && needsAgreement(user.id), version: config.terms.version, termsUrl: config.terms.termsUrl, privacyUrl: config.terms.privacyUrl }
         : null,
+      compile: compileInfo(texDeps, user ? user.id : config.authMode === 'none' ? null : '', user !== null),
     };
     return c.json(body);
   });
@@ -232,7 +241,7 @@ export function createApp(deps: AppDeps): Hono {
     if (!user) return fail(c, 401, ERROR_CODES.unauthenticated, '로그인이 필요해요.');
     const body = (await c.req.json().catch(() => null)) as { confirm?: unknown } | null;
     if (body?.confirm !== ACCOUNT_DELETE_CONFIRM) return fail(c, 400, ERROR_CODES.badRequest, `확인 문구로 "${ACCOUNT_DELETE_CONFIRM}"를 적어 주세요.`);
-    deleteAccount({ accounts, entitlements, ledger: deps.ledger, audit: deps.audit, secret: config.sessionSecret }, user.id, user.id, now().getTime());
+    deleteAccount({ accounts, entitlements, ledger: deps.ledger, tex: deps.tex, audit: deps.audit, secret: config.sessionSecret }, user.id, user.id, now().getTime());
     deleteCookie(c, SESSION_COOKIE, { path: '/' });
     log('계정 삭제');
     return c.json({ ok: true });
@@ -362,6 +371,9 @@ export function createApp(deps: AppDeps): Hono {
       }
     },
   );
+
+  // ---- LaTeX 컴파일 ----
+  registerTexRoutes(app, texDeps);
 
   app.all('/api/*', (c) => fail(c, 404, 'not_found', '찾을 수 없는 요청이에요.'));
 

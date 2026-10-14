@@ -1,6 +1,6 @@
 // 권한(요금제) 고르기. 우선순위: 관리자 수동 부여(유효 기간 안) → 기본 요금제. 결제(M5)를 넣으면 그 사이에 이용권·구독이 들어간다.
 import type { DatabaseSync } from 'node:sqlite';
-import { MAX_DOC_CHARS, type EntitlementSource, type Plan, type PlanLimits } from '@alldoc/shared';
+import { DEFAULT_COMPILE_LIMITS, MAX_DOC_CHARS, type EntitlementSource, type Plan, type PlanLimits } from '@alldoc/shared';
 import type { Config } from '../config';
 
 export interface Entitlements {
@@ -25,7 +25,7 @@ const ANONYMOUS: Entitlements = {
   planId: 'anonymous',
   planName: '로그인 없음',
   source: 'anonymous',
-  limits: { aiRequestsPerDay: null, aiRequestsPerMonth: null, aiMaxDocChars: MAX_DOC_CHARS, aiCostCapMicroUsdPerMonth: null },
+  limits: { aiRequestsPerDay: null, aiRequestsPerMonth: null, aiMaxDocChars: MAX_DOC_CHARS, aiCostCapMicroUsdPerMonth: null, ...DEFAULT_COMPILE_LIMITS },
   validUntil: null,
 };
 

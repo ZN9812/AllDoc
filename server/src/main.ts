@@ -11,6 +11,8 @@ import { EntitlementStore } from './billing/entitlements';
 import { openDb } from './db';
 import { LedgerStore } from './ledger';
 import { dayKey, QuotaStore } from './quota';
+import { HttpCompilerClient, MockCompilerClient } from './tex/client';
+import { TexStore } from './tex/store';
 
 // 설정을 읽기 전에 .env 를 환경 변수로 읽는다(개발·시험용. 운영에서는 읽지 않는다).
 const dotenvFile = loadDotEnv();
@@ -37,15 +39,27 @@ const entitlements = new EntitlementStore(db, config);
 const ledger = new LedgerStore(db);
 const providers = createProviders(config);
 const audit = new AuditLog(db);
-const app = createApp({ config, quota, accounts, entitlements, audit, providers, ledger });
+// LaTeX 컴파일(COMPILER=mock|http). 컴파일하려고 올린 파일은 DATA_DIR/tex 에 두고 보관 기간 뒤 지운다.
+const tex = config.compiler ? new TexStore(db, config.dataDir) : undefined;
+const compiler = !config.compiler ? undefined : config.compiler.mode === 'mock' ? new MockCompilerClient() : new HttpCompilerClient(config.compiler.urls, config.compiler.secret);
+const app = createApp({ config, quota, accounts, entitlements, audit, providers, ledger, compiler, tex });
 
 // 지난 사용 기록은 62일 뒤에 지운다(요금제의 월 한도를 계산하려면 이번 달 기록이 있어야 한다).
 const prune = () => {
   const cutoff = dayKey(new Date(Date.now() - 62 * 86_400_000), config.timezone);
   quota.prune(cutoff);
+  if (tex && config.compiler) {
+    try {
+      const r = tex.prune(Date.now(), config.compiler.retentionDays);
+      if (r.blobs + r.outputs > 0) console.log(`컴파일 파일 정리: 올린 파일 ${r.blobs}개, PDF ${r.outputs}개를 지웠어요.`);
+    } catch (e) {
+      console.error(`컴파일 파일을 정리하지 못했어요: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 };
 prune();
-const pruneTimer = setInterval(prune, 6 * 3_600_000);
+// 만든 PDF는 한 시간 뒤에 지우므로 정리는 30분마다 한다.
+const pruneTimer = setInterval(prune, 30 * 60_000);
 pruneTimer.unref();
 
 // 하루 한 번 데이터 파일 스냅숏(서버를 켤 때와 그 뒤 한 시간마다 "오늘 것이 있는지" 확인한다).
@@ -68,6 +82,11 @@ const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   const perDay = plan?.limits.aiRequestsPerDay;
   console.log(`로그인 방식: ${config.authMode} · 기본 요금제: ${config.authMode === 'none' ? '없음(한도 없음)' : `${plan?.name} · 하루 AI ${perDay === null ? '제한 없음' : `${perDay}회`}`} (${config.timezone})`);
   console.log(config.backup.keep === 0 ? '백업: 꺼짐(BACKUP_KEEP=0)' : `백업: 하루 한 번 ${config.backup.dir} (최근 ${config.backup.keep}개)`);
+  console.log(
+    config.compiler
+      ? `LaTeX 컴파일: ${config.compiler.mode === 'mock' ? '데모 컴파일러(실제 TeX 아님)' : `일꾼 ${config.compiler.urls.join(', ')}`} · 동시 ${config.compiler.concurrency} · 대기 ${config.compiler.queue} · 올린 파일 ${config.compiler.retentionDays}일 보관`
+      : 'LaTeX 컴파일: 꺼짐(COMPILER=off)',
+  );
   if (config.aiDailyBudgetMicroUsd !== null) console.log(`AI 전체 하루 비용 상한: $${config.aiDailyBudgetMicroUsd / 1_000_000}`);
   for (const mode of ['chat', 'format_check'] as const) {
     const p = providers[mode];

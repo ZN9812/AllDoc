@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { DocSummarySchema, StyleProfileSchema } from './style';
 import { ProposalSchema } from './ops';
 import { PlanInfoSchema } from './billing';
+import { CompileInfoSchema } from './tex/api';
 
 export { MAX_DOC_CHARS } from './limits';
 
@@ -64,6 +65,8 @@ export const MeResponseSchema = z.object({
   agreement: z
     .object({ required: z.boolean(), version: z.string(), termsUrl: z.string().nullable(), privacyUrl: z.string().nullable() })
     .nullable(),
+  /** LaTeX 컴파일. 서버에 컴파일이 연결되어 있지 않으면 null */
+  compile: CompileInfoSchema.nullable(),
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;
 
@@ -92,5 +95,11 @@ export const ERROR_CODES = {
   forbidden: 'forbidden',
   /** 약관(새 판)에 동의해야 쓸 수 있는 기능 */
   agreementRequired: 'agreement_required',
+  /** 이 서버에 LaTeX 컴파일이 연결되어 있지 않음 */
+  compileUnavailable: 'compile_unavailable',
+  /** 컴파일 요청의 파일 중 서버에 없는(이 사용자가 올리지 않은) 것이 있음. 응답의 missing 에 해시 목록 */
+  blobsMissing: 'blobs_missing',
+  /** 컴파일 일꾼 연결·응답 문제 */
+  compileFailed: 'compile_failed',
   internal: 'internal',
 } as const;

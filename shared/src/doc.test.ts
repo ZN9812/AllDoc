@@ -23,8 +23,15 @@ describe('파일 형식 판별', () => {
     expect(baseName('.hidden')).toBe('.hidden');
   });
 
-  it('PDF 는 AI 대상이 아니다', () => {
+  it('.tex 는 LaTeX 프로젝트다(.zip 은 형식이 아니라 가져오기 경로)', () => {
+    expect(kindFromName('논문.TEX')).toBe('tex');
+    expect(kindFromName('project.zip')).toBeNull();
+    expect(isFormatKind('tex')).toBe(false);
+  });
+
+  it('PDF 와 LaTeX(M3 전까지)는 AI 대상이 아니다', () => {
     expect(isAiTarget('pdf')).toBe(false);
+    expect(isAiTarget('tex')).toBe(false);
     expect(isAiTarget('hwp')).toBe(true);
   });
 });

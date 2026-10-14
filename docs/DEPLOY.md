@@ -31,7 +31,11 @@
 | `BACKUP_DIR`, `BACKUP_KEEP` | 아니오 | 하루 한 번 데이터 파일 스냅숏을 둘 폴더(기본 `DATA_DIR/backups`)와 남길 개수(기본 14, `0` 이면 끔). 아래 "백업" |
 | `APP_TIMEZONE` | 아니오 | 하루가 바뀌는 시간대(기본 `Asia/Seoul`) |
 | `PORT` | 아니오 | 서버가 듣는 포트(기본 8787). Docker에서는 그대로 두고 바깥 포트만 바꾸는 편이 쉽습니다. |
-| `DATA_DIR` | 아니오 | SQLite(계정, 사용 횟수, AI 사용량 원장, 요금제 부여, 관리 기록)를 둘 폴더. 이미지 안에서는 `/data` |
+| `DATA_DIR` | 아니오 | SQLite(계정, 사용 횟수, AI·컴파일 원장, 요금제 부여, 관리 기록)와 컴파일하려고 받은 파일(`tex/`)을 둘 폴더. 이미지 안에서는 `/data` |
+| `COMPILER` | 아니오 | LaTeX 컴파일: `off`(기본, 컴파일 없음) · `mock`(데모 컴파일러, 실제 TeX 아님) · `http`(컴파일 일꾼). 아래 "LaTeX 컴파일" |
+| `COMPILER_URLS`, `COMPILER_SECRET` | `http`일 때 | 일꾼 주소(쉼표로 여러 개, 차례로 돌려 씀)와 요청 서명 비밀값(32자 이상, 일꾼과 같은 값) |
+| `COMPILER_CONCURRENCY`, `COMPILER_QUEUE` | 아니오 | 서버 전체 동시 컴파일 수(기본 2)와 기다릴 수 있는 수(기본 10, 넘으면 `503` + `Retry-After`) |
+| `TEX_RETENTION_DAYS` | 아니오 | 컴파일하려고 받은 파일을 마지막으로 쓴 날부터 며칠 두는지(기본 7, **임시 값·결정 필요**) |
 | `ALLOWED_ORIGINS` | 아니오 | `PUBLIC_URL` 외에 요청을 받아들일 출처(쉼표로 구분). 보통 필요 없습니다. |
 
 설정이 잘못되면 서버가 켜질 때 무엇이 문제인지 한국어로 알려 주고 멈춥니다.
@@ -101,12 +105,13 @@ docker compose up -d --build
 {
   "default": "free",
   "plans": [
-    { "id": "free", "name": "무료", "limits": { "aiRequestsPerDay": 5, "aiRequestsPerMonth": 60, "aiMaxDocChars": 60000, "aiCostCapMicroUsdPerMonth": 3000000 } },
+    { "id": "free", "name": "무료", "limits": { "aiRequestsPerDay": 5, "aiRequestsPerMonth": 60, "aiMaxDocChars": 60000, "aiCostCapMicroUsdPerMonth": 3000000,
+      "compileTimeoutSec": 60, "compilesPerDay": 50, "compileSecondsPerDay": null, "projectMaxBytes": 52428800 } },
     { "id": "pro", "name": "프로", "limits": { "aiRequestsPerDay": null, "aiRequestsPerMonth": 600, "aiMaxDocChars": 120000, "aiCostCapMicroUsdPerMonth": 30000000 } }
   ]
 }
 ```
-- `null` 은 제한 없음입니다. `aiMaxDocChars` 는 120,000 이하, `aiCostCapMicroUsdPerMonth` 는 한 사용자의 한 달 AI 원가 상한(마이크로달러, 3000000 = $3)이며 화면에 알리지 않는 안전 장치입니다. 위 숫자는 형식을 보이려는 예시이고 정한 가격·한도가 아닙니다.
+- `null` 은 제한 없음입니다. 컴파일 한도 4개(`compileTimeoutSec` 컴파일 한 번의 시간 제한(초), `compilesPerDay`, `compileSecondsPerDay`, `projectMaxBytes` 프로젝트 전체 크기)는 적지 않으면 임시 기본값(60초, 제한 없음, 제한 없음, 50MB)을 씁니다. **이 기본값은 정한 값이 아닙니다**(무료 사용자에게 컴파일을 줄지, 시간 제한을 얼마로 할지는 결정 필요, `docs/PRODUCT.md`). `aiMaxDocChars` 는 120,000 이하, `aiCostCapMicroUsdPerMonth` 는 한 사용자의 한 달 AI 원가 상한(마이크로달러, 3000000 = $3)이며 화면에 알리지 않는 안전 장치입니다. 위 숫자는 형식을 보이려는 예시이고 정한 가격·한도가 아닙니다.
 - 파일이 잘못되면(기본 요금제가 없음, id 가 겹침, 모르는 항목) 서버가 켜질 때 알려 주고 멈춥니다. compose 에서는 `./plans.json:/config/plans.json:ro` 로 붙이고 `PLANS_CONFIG_PATH=/config/plans.json` 을 적습니다.
 - 관리자 도구(같은 설정·데이터 폴더로 실행. 바꾸는 명령은 모두 관리 기록에 남습니다):
 
@@ -115,6 +120,20 @@ docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dis
 docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/admin.js grant g:1234 pro --days 30 --note 베타
 # 그 밖에: plans · revoke · ban · unban · logout-all · role · delete --yes · audit
 ```
+
+## LaTeX 컴파일
+
+LaTeX 프로젝트는 브라우저에 저장하고, PDF 를 만들 때만 서버로 보냅니다(설계: [LATEX.md](LATEX.md)).
+
+- **구성**: 앱 서버는 로그인·약관·요금제 한도·파일 확인·대기열을 맡고, 실제 컴파일은 별도 이미지의 **컴파일 일꾼**(`compiler/`)이 내부망에서 합니다. 일꾼은 비밀값·DB·파일 저장소를 갖지 않고, 작업마다 받은 파일만 작업 폴더에 썼다가 지웁니다. docker 소켓은 어디에도 넘기지 않습니다.
+- **띄우기**: `.env` 에 `COMPILER=http`, `COMPILER_URLS=http://compiler:8790`, `COMPILER_SECRET=<32자 이상>` 을 적고 `docker compose --profile latex up -d --build`. compose 의 `compiler` 서비스는 내부망(`internal: true`)만 쓰고, 읽기 전용 루트, `/work`·`/tmp` 용량 상한 tmpfs, `cap_drop: ALL`, `no-new-privileges`, 프로세스·메모리·CPU 상한, **`compiler/seccomp.json`**(Docker 기본 프로필 + `unshare setns mount umount2 pivot_root clone clone3`)으로 뜹니다.
+- **작업마다**: bubblewrap 으로 이름공간(네트워크·PID 등)을 나누고 환경 변수를 비운 뒤 TeX Live·글꼴만 읽기 전용, 작업 폴더만 쓰기로 붙입니다. `prlimit` 으로 주소 공간(2GB)·CPU 시간·파일 크기(200MB)·프로세스 수를 막고, 시간 제한을 넘으면 프로세스 묶음을 강제 종료합니다. TeX 는 `shell_escape=f`, `openin_any=p`, `openout_any=p`, `latexmk -norc` 로 돕니다.
+- **운영 서버 커널**: Ubuntu 23.10 이상은 AppArmor 가 권한 없는 사용자 이름공간을 막을 수 있습니다(`kernel.apparmor_restrict_unprivileged_userns=1`). 그러면 일꾼 안의 bubblewrap 이 돌지 않습니다. CI 는 이 값을 0 으로 바꾸고 돌립니다. 운영 서버에서 이 값을 바꿀 수 없으면 nsjail 이나 작업별 컨테이너로 가야 합니다(아직 만들지 않음).
+- **보관**: 받은 파일은 `DATA_DIR/tex/blobs` 에 내용 해시 이름으로 두고, 그 사용자가 마지막으로 쓴(올리거나 컴파일한) 날부터 `TEX_RETENTION_DAYS` 뒤 지웁니다(30분마다 정리). 만든 PDF 는 `DATA_DIR/tex/out` 에 두고 한 시간 뒤 지웁니다. "이미 올린 파일" 대조는 그 사용자가 올린 것만 봅니다(다른 사람의 파일이 있는지 알 수 없게). 탈퇴하면 그 사용자의 기록을 지우고, 아무도 쓰지 않게 된 파일은 다음 정리 때 지웁니다.
+- **원장**: 컴파일마다 `compile_events` 에 엔진·시간·결과·크기·파일 수만 남깁니다(파일 이름·내용 없음).
+- **한도**: 사용자당 동시 1개, 서버 전체 동시 `COMPILER_CONCURRENCY`·대기 `COMPILER_QUEUE`, 요금제의 컴파일 한도(위 "요금제와 관리자 도구"). 같은 파일·엔진으로 한 시간 안에 다시 컴파일하면 저장해 둔 결과를 돌려주고 횟수에 세지 않습니다.
+- **데모**: `COMPILER=mock` 은 TeX 없이 정해진 규칙으로 작은 PDF·로그를 돌려줍니다(시험·데모용. `\begin{itemise}` 가 있으면 오류).
+- **로그인 없는 설치(`AUTH_MODE=none`)**: 모든 사용자가 한 사람으로 취급되어 "올린 파일" 대조·동시 1개·PDF 받기를 함께 씁니다. 신뢰할 수 있는 내부망에서만 쓰세요.
 
 ## 역방향 프록시(HTTPS)
 
@@ -190,11 +209,12 @@ docker build --build-arg VITE_DISABLE_DOCX=1 -t alldoc .
 
 - [ ] **SuperDoc 독점 엔진 라이선스를 확인했다**(또는 Word 지원을 끄고 배포한다). [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)
 - [ ] 이름과 로고를 정했다. "AllDoc"은 임시 이름이고 비슷한 이름의 앱이 있습니다. 상표와 도메인을 확인하세요(`web/src/brand/`).
-- [ ] 개인정보 처리 방침을 만들었다. 이 서비스는 로그인한 사용자의 계정(구글 계정 식별값·이름·이메일·약관 동의)과 날짜별 AI 사용 횟수, AI 요청별 사용량 기록(토큰·원가, 문서 글 없음)을 서버에 두고, 백업 스냅숏에 보관 기간 동안 남깁니다(위 "구글 로그인 설정"과 "백업"). AI를 쓰면 **문서의 글이 AI 서비스(Anthropic)로 전송**됩니다(처음 쓸 때 동의 창으로 알립니다). 법적 고지 문구는 직접 검토하세요.
+- [ ] 개인정보 처리 방침을 만들었다(LaTeX 컴파일을 켜면 "컴파일하려고 보낸 프로젝트 파일을 마지막 사용 뒤 N일 보관" 도 적는다). 이 서비스는 로그인한 사용자의 계정(구글 계정 식별값·이름·이메일·약관 동의)과 날짜별 AI 사용 횟수, AI 요청별 사용량 기록(토큰·원가, 문서 글 없음)을 서버에 두고, 백업 스냅숏에 보관 기간 동안 남깁니다(위 "구글 로그인 설정"과 "백업"). AI를 쓰면 **문서의 글이 AI 서비스(Anthropic)로 전송**됩니다(처음 쓸 때 동의 창으로 알립니다). 법적 고지 문구는 직접 검토하세요.
 - [ ] 실제 API 키로 "AI 대화"와 "내 규칙"을 한 번씩 돌려 보고, 서버 기록에 경고가 없는지 확인했다. 이 저장소의 시험은 가짜 AI·가짜 클라이언트로만 돌았습니다([AI.md](AI.md)).
 - [ ] Anthropic 콘솔에 월 지출 한도를 걸었고, 요금제 한도(`DAILY_AI_LIMIT` 또는 `PLANS_CONFIG_PATH`)와 `AI_DAILY_BUDGET_USD` 를 정했다.
 - [ ] 서버 밖 백업 복사를 설정했고, 스냅숏으로 되살리는 훈련을 한 번 했다.
 - [ ] 약관 동의를 받는다면 `TERMS_VERSION`·`TERMS_URL`·`PRIVACY_URL` 을 넣었다(약관 본문은 법률 검토 필요).
+- [ ] LaTeX 컴파일을 켠다면: 컴파일 일꾼 이미지를 실제 서버에서 띄우고 탈출 시험(`docker run … alldoc-compiler node dist/escape.js`, `.github/workflows/latex.yml` 과 같은 설정)이 통과하는 것을 확인했다. 커널의 사용자 이름공간 설정(위 "LaTeX 컴파일")을 확인했다. 컴파일 한도·보관 날 수를 정했다(지금 값은 임시).
 - [ ] 구글 로그인을 실제 도메인에서 끝까지 해 봤다(로그인 → AI 사용 → 로그아웃).
 - [ ] HTTPS이고, `SESSION_SECRET`이 충분히 긴 무작위 값이다.
 - [ ] 한글(HWP·HWPX)·Word 문서를 **실제 업무 파일**로 열고, 고치고, 내려받아 한글·Word에서 다시 열어 보았다(아래 한계 참고).
@@ -256,6 +276,16 @@ docker build --build-arg VITE_DISABLE_DOCX=1 -t alldoc .
     - **서식 점검(문서 안 일관성·기준 문서)은 본문만 비교합니다.** 글상자의 서식은 본문과 다른 게 보통이라 섞으면 잘못된 지적이 나옵니다. AI에게는 서식 규칙을 "글상자"를 언급하지 않았다면 본문에만 적용하라고 알립니다(맞춤법·말투 교정은 모두 적용합니다).
     - **글상자가 많은 문서는 느립니다.** 글상자 번호를 하나씩 조회하기 때문입니다. 이 환경의 실제 SuperDoc에서 글상자 안에 오탈자가 하나씩 든 문서를 맞춤법으로 요청해 제안 카드가 뜰 때까지 걸린 시간은 글상자 0개 0.6초, 30개 2.3초, 100개 약 15초였고, 그 제안(30곳·100곳)을 전체 적용하는 데는 각각 약 3.8초, 약 33초였습니다. 편집기가 같은 번호 목록으로 다시 읽는 일은 문단 번호가 바뀌지 않는 동안 되풀이하지 않게 했습니다(그 전에는 100개 문서의 전체 적용이 약 48초였습니다). 남은 시간이 어디에 쓰이는지는 재어 보지 않았습니다(고칠 곳이 100곳이라 편집기가 글을 하나씩 고치는 시간이 클 것으로 짐작합니다). 글상자 100개는 흔한 문서가 아니고, 이 값들은 한 번씩 잰 값입니다.
   - **"문서에서 보기"**: 편집기가 그 쪽을 그리고 있으면 머리말·꼬리말·각주·글상자 안의 글도 문서 위에 강조하고 그 곳으로 이동합니다. 편집기가 쪽에 그리지 않는 미주는 이동하지 못하고 그렇다고 알립니다. 표 칸 안의 문단에 놓인 글상자는 시험한 문서에서 편집기가 글의 자리를 알려 주지 못해 강조하지 못했고, 대신 "이 글은 글상자 2에 있어요…"라고 알립니다(글상자가 문서 위에 그려지는 것은 화면으로 확인했습니다).
+- **LaTeX**(M2, AI 없음. 2026-10-14 이 환경에서 확인한 것이며, 진짜 TeX 시험과 탈출 시험은 CI 의 `latex` 작업에서만 돈다):
+  - **컴파일 일꾼 이미지는 이 환경에서 만들어 보지 못했습니다**(Docker Hub 가 기본 이미지 요청에 429 를 돌려줌). 이미지의 TeX Live 는 Debian bookworm 패키지(TeX Live 2022)로 정했고, 설계의 `install-tl` 연도 스냅숏으로 바꿀지는 결정 필요입니다. 이미지 크기는 재지 않았습니다.
+  - 대신 이 기계(Ubuntu 24.04, TeX Live 2023 패키지, root, AppArmor 없음)에서 일꾼을 직접 띄워 확인했습니다: 탈출 시험 12개 통과(`compiler/test/escape/run.ts`), bubblewrap 을 끄면 1개(LuaTeX `io.open('/etc/passwd')`), TeX 설정(`shell_escape`·`openin_any`·`openout_any`)을 풀면 2개(`\write18`, LuaTeX `os.execute` — 둘 다 작업 폴더 안에만 파일이 생김)가 실패해 두 겹이 따로 막는 것을 봤습니다. 컨테이너 안(읽기 전용 루트, `cap_drop ALL`, seccomp 프로필, 권한 없는 사용자)에서는 이번에 돌려 보지 못했습니다(이전 실험 E3 만 있음).
+  - 템플릿 4개를 진짜 TeX 로 컴파일한 시간은 0.9–9.2초였습니다(`templates/latex/README.md`). 한국어 템플릿 PDF 를 `pdftotext` 로 읽으면 한글 구절 4개가 원문과 같았습니다(`e2e/tex-real.spec.ts`).
+  - 오류가 있으면 PDF 를 돌려주지 않습니다(TeX 가 오류를 넘기고 만든 PDF 도 버림). 마지막으로 성공한 PDF 는 화면에 남겨 둡니다.
+  - 로그의 경고가 어느 파일에서 났는지는 로그의 괄호를 따라가 찾는데, **공백이 든 파일 이름은 따라가지 못합니다**(오류는 `-file-line-error` 의 파일:줄을 그대로 써서 영향 없음).
+  - EPS→PDF 자동 변환(제한된 셸 실행)은 꺼져 있습니다. biber 의 원격 자료(`location=remote`)는 네트워크가 없어 안 됩니다(시험하지 않음).
+  - Windows 에서 만든 ZIP 의 한글 파일 이름(CP949, UTF-8 표시 없음)은 깨져 보일 수 있습니다(UTF-8 로 읽히지 않으면 latin1 로 읽음). ZIP64(4GB 넘는 ZIP)는 열지 않습니다.
+  - **한글 입력기(IME)로 원고에 한글을 치는 것은 손으로 확인하지 못했습니다**(Playwright 의 입력은 입력기를 거치지 않음). 데스크톱 크롬·사파리, 휴대폰 모두 "확인 못 함"입니다.
+  - SyncTeX(원고↔PDF 위치 이동), 컴파일 중간 파일 재사용, 실시간 공동 편집은 없습니다(M7).
 - **PDF**: 보기만 됩니다. 한글 문서의 PDF 저장은 한글 편집기의 인쇄 창을 엽니다(브라우저가 PDF로 저장). Word 문서의 PDF 저장은 아직 없습니다.
 - **휴대폰**: Chromium 에뮬레이션(Pixel 7)으로 화면 배치와 단추 크기를 시험했습니다. 실제 기기(터치 입력, 한글 입력기, 가상 키보드)에서는 시험하지 못했습니다. Word 편집기의 도구는 영어 보조 문구(접근성 라벨 등)가 일부 남아 있습니다.
 - **AI**: 제안이 문서에 맞는지 서버가 걸러 주지만, 제안의 **내용이 옳은지**는 보장하지 못합니다. 그래서 항상 사용자가 적용 여부를 정합니다.

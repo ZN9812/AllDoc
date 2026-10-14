@@ -53,6 +53,8 @@ SuperDoc의 문의처는 패키지의 `NOTICE.md`에 `legal@superdoc.dev`로 적
 | DOMPurify | 3.4.16 | MPL-2.0 또는 Apache-2.0 | 마크다운 미리보기에서 위험한 코드 걸러내기 |
 | zod | 4.6.5 | MIT | 요청·응답 검증(브라우저와 서버 공용) |
 | Noto Sans KR (`@fontsource-variable/noto-sans-kr`) | 5.3.0 | SIL OFL 1.1 | 화면 글꼴 |
+| [CodeMirror 6](https://codemirror.net) `@codemirror/{state,view,commands,language,search,lint,legacy-modes}` | state 6.7.6, view 6.43.14, commands 6.11.1, language 6.13.1, search 6.7.2, lint 6.9.7, legacy-modes 6.5.5 | MIT | LaTeX 원고 편집기(구문 색은 `legacy-modes` 의 `stex`). tex 문서를 열 때만 내려받습니다. 함께 들어가는 `@lezer/*`, `style-mod`, `w3c-keyname`, `crelt`, `@marijn/find-cluster-break` 도 MIT 입니다. |
+| [fflate](https://github.com/101arrowz/fflate) | 0.8.3 | MIT | LaTeX 프로젝트 ZIP 읽기·쓰기, 템플릿 ZIP 만들기(빌드) |
 
 ### 한글 편집기에 함께 들어가는 글꼴과 라이선스
 
@@ -75,6 +77,27 @@ rhwp-studio 빌드는 웹 글꼴(Pretendard, 나눔, Noto, 고운, Spoqa 등)을
 | SQLite | Node.js 내장(`node:sqlite`) | Public Domain / Node.js (MIT) | 하루 사용 횟수 저장 |
 
 서버는 esbuild로 `dist/main.js` 하나로 묶으므로, 위 부품의 코드가 그 파일 안에 들어갑니다.
+
+## LaTeX 컴파일 일꾼 이미지(`compiler/Dockerfile`, 앱 이미지와 따로)
+
+일꾼 프로그램 자체는 이 저장소의 코드(AGPL-3.0)와 `@alldoc/shared` 뿐이고 npm 의존성이 없습니다. 이미지에는 Debian bookworm 패키지로 다음을 넣습니다. 이 저장소에 소스를 담지 않으며, 각 패키지의 저작권 파일은 이미지의 `/usr/share/doc/<패키지>/copyright` 대신 Debian 저장소에서 볼 수 있습니다(이미지 크기를 줄이려고 `/usr/share/doc` 을 지움 — 재배포할 때 고지 방법은 확인 필요).
+
+| 부품 | 라이선스 | 쓰임 |
+| --- | --- | --- |
+| TeX Live 2022 (Debian `texlive-*`, `latexmk`, `biber`) | 묶음마다 다름(대부분 LPPL·GPL·공개 도메인 등의 자유 라이선스, Debian 의 DFSG 기준) | 컴파일 |
+| kotex(`texlive-lang-korean`) | LPPL 등(패키지별) | 한국어 조판 |
+| Noto Sans/Serif CJK(`fonts-noto-cjk`) | SIL OFL 1.1 | 한국어 템플릿 글꼴 |
+| 나눔 글꼴(`fonts-nanum`) | SIL OFL 1.1 | 한국어 글꼴 |
+| [bubblewrap](https://github.com/containers/bubblewrap) | LGPL-2.0-or-later | 작업마다 격리 |
+| util-linux(`prlimit`) | GPL-2.0-or-later 등 | 자원 상한 |
+| Node.js 22(`node:22-bookworm-slim`) | MIT 등 | 일꾼 실행 |
+
+gVisor(`runsc`)는 설계에서 "가능하면 쓴다"로 두었고 이미지·compose 에 넣지 않았습니다(compose 의 주석만).
+`compiler/seccomp.json` 은 Docker 기본 seccomp 프로필(moby/profiles 저장소 `seccomp/default.json`, Apache-2.0, 2026-10-14 에 받은 커밋 `4b8214fc`)에 호출 7개를 허용하는 규칙 하나를 더한 것입니다.
+
+## LaTeX 템플릿(`templates/latex/`)
+
+이 저장소에서 직접 쓴 것입니다. 사용자의 논문이 AGPL 에 얽히지 않도록 CC0 또는 MIT 로 따로 내놓을 계획이지만 **아직 정하지 않았습니다(결정 필요)**. 정하기 전까지는 저장소 전체 라이선스를 따릅니다.
 
 ## 개발에만 쓰고 배포하지 않는 도구
 

@@ -13,6 +13,7 @@ COPY package.json package-lock.json ./
 COPY shared/package.json shared/
 COPY web/package.json web/
 COPY server/package.json server/
+COPY compiler/package.json compiler/
 RUN npm ci --no-audit --no-fund
 
 COPY . .

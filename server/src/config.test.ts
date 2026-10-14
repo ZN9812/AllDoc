@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { DEFAULT_COMPILE_LIMITS } from '@alldoc/shared';
 import { ConfigError, DEFAULT_MODEL, loadConfig } from './config';
 import { testConfig } from './test-support/helpers';
 
@@ -15,7 +16,7 @@ const problems = (fn: () => unknown): string[] => {
 describe('서버 설정', () => {
   it('기본값: 한도 5회, 한국 시간, Claude 기본 모델', () => {
     const c = testConfig({ DAILY_AI_LIMIT: '', AI_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'k' });
-    expect(c.plans).toEqual({ defaultPlanId: 'free', list: [{ id: 'free', name: '무료', limits: { aiRequestsPerDay: 5, aiRequestsPerMonth: null, aiMaxDocChars: 120_000, aiCostCapMicroUsdPerMonth: null } }] });
+    expect(c.plans).toEqual({ defaultPlanId: 'free', list: [{ id: 'free', name: '무료', limits: { aiRequestsPerDay: 5, aiRequestsPerMonth: null, aiMaxDocChars: 120_000, aiCostCapMicroUsdPerMonth: null, ...DEFAULT_COMPILE_LIMITS } }] });
     expect(c.aiDailyBudgetMicroUsd).toBeNull();
     expect(c.terms).toBeNull();
     expect(c.timezone).toBe('Asia/Seoul');

@@ -1,7 +1,7 @@
 # AllDoc 작업 안내
 
 한글(HWP·HWPX)·Word(DOCX)·TXT/MD 를 브라우저에서 편집하고 PDF 는 보기만 하는 웹 편집기다. AI 는 서식·문장 변경을 **제안만** 하고, 사용자가 적용한 것만 문서에 반영된다.
-"AllDoc"은 임시 이름이다. 라이선스는 AGPL-3.0. 제품 명세 `docs/SPEC.md`, 화면 규칙 `docs/DESIGN.md`, AI 연결 `docs/AI.md`, 배포와 **알려진 한계(확인한 수치 포함)** `docs/DEPLOY.md`, 한글 캡션 조사 `docs/CAPTION.md`, 제품화(계정·요금제·결제) 계획 `docs/PRODUCT.md`, LaTeX 편집 설계 `docs/LATEX.md`(둘 다 아직 구현 전). `docs/TRUST.md` 는 검토 후 **진행하지 않기로 한** 존재 증명·종단간 암호화 저장 설계 기록이다(다시 제안하기 전에 읽는다).
+"AllDoc"은 임시 이름이다. 라이선스는 AGPL-3.0. 제품 명세 `docs/SPEC.md`, 화면 규칙 `docs/DESIGN.md`, AI 연결 `docs/AI.md`, 배포와 **알려진 한계(확인한 수치 포함)** `docs/DEPLOY.md`, 한글 캡션 조사 `docs/CAPTION.md`, 제품화(계정·요금제·결제) 계획 `docs/PRODUCT.md`(M1 구현, 결제는 아직), LaTeX 편집 설계와 구현 상태 `docs/LATEX.md`(M2 편집·컴파일은 구현, AI(M3)는 아직). `docs/TRUST.md` 는 검토 후 **진행하지 않기로 한** 존재 증명·종단간 암호화 저장 설계 기록이다(다시 제안하기 전에 읽는다).
 
 ## 작업 규칙
 - 사용자에게 보이는 글은 모두 한국어로 쓴다: 답변, 화면 문구, 문서, 오류 메시지, 시험 이름, 커밋 메시지.
@@ -14,9 +14,11 @@
 ```
 shared/  웹·서버 공용 타입과 zod 스키마 (문단 위치 CellPlace·AreaPlace, 변경 Op, textGuard)
 web/     React 19 + Vite + vitest. 문서 엔진 web/src/engines/{hwp,docx,...}, 화면 web/src/editor
-server/  Hono. 로그인·계정·요금제 한도·AI 중계·원장. SQLite 는 server/src/db(번호 붙은 마이그레이션), 관리자 도구 server/src/admin.ts.
+server/  Hono. 로그인·계정·요금제 한도·AI 중계·원장·LaTeX 컴파일 중계(server/src/tex: 해시 대조·대기열·가짜 컴파일러). SQLite 는 server/src/db(번호 붙은 마이그레이션), 관리자 도구 server/src/admin.ts.
          AI 프롬프트와 데모 AI 는 server/src/ai/{prompt,mock}.ts
-e2e/     Playwright. 빌드한 서버(포트 8799, AUTH_MODE=dev, AI_PROVIDER=mock)에 붙는다
+compiler/ LaTeX 컴파일 일꾼(별도 이미지 compiler/Dockerfile). bubblewrap 격리, 탈출 시험 compiler/test/escape/run.ts
+templates/latex/  LaTeX 템플릿. 빌드 때 web/public/templates/*.zip 으로 묶는다(web/scripts/pack-templates.mjs)
+e2e/     Playwright. 빌드한 서버(포트 8799, AUTH_MODE=dev, AI_PROVIDER=mock, COMPILER=mock)에 붙는다
 ```
 - 한글은 rhwp(`@rhwp/core` 코어 + 자체 호스팅한 편집기 rhwp-studio), Word 는 SuperDoc 이다. SuperDoc 의 독점 DOCX 엔진 라이선스는 README·`THIRD_PARTY_NOTICES.md` 를 보고, `VITE_DISABLE_DOCX=1` 로 Word 지원을 끌 수 있다.
 
@@ -28,11 +30,13 @@ npm run check                            # 타입 검사 + 단위 시험 + 라�
 RHWP_STUDIO_STRICT=1 npm run build       # 처음 한 번 GitHub 에서 rhwp-studio 와 예제 한글 문서 12개를 .cache 에 받는다
 REQUIRE_HWP_SAMPLES=1 npm test -w web -- src/engines/hwp/corpus.test.ts   # 예제 문서 대조(빌드 뒤)
 npx playwright test e2e/<파일> --project=desktop                          # 종단 시험(빌드 뒤)
+npm run test:escape -w compiler                                            # 탈출 시험(TeX Live·bubblewrap 필요, 없으면 건너뜀)
 ```
-- 종단 시험은 서버 두 개를 띄운다: 8799(기본)와 8798(약관 동의를 켠 서버, `e2e/terms.spec.ts` 만). 8799 포트에 남은 옛 서버를 재사용하므로, 다시 빌드한 뒤에는 `pkill -f "[s]erver/dist/main.js"` 로 끄고 돌린다. `PW_CHROMIUM_PATH` 로 크로미움을 지정할 수 있다. `REQUIRE_SOFFICE=1`(LibreOffice 필수)·`REQUIRE_HWP_SAMPLES=1` 이면 건너뛰지 않고 실패한다.
+- LaTeX 진짜 컴파일 시험: 일꾼을 띄우고(`npm run build -w compiler && COMPILER_SECRET=e2e-compiler-secret-e2e-compiler-secret-0123 WORK_DIR=/tmp/alldoc-work node compiler/dist/main.js`) `REQUIRE_TEXLIVE=1 npx playwright test e2e/tex-real.spec.ts --project=tex-real`. `REQUIRE_TEXLIVE=1` 이면 탈출 시험·tex-real 이 건너뛰지 않고 실패한다. CI 에서는 `.github/workflows/latex.yml` 이 일꾼 이미지를 만들어 돌린다(관련 파일이 바뀔 때와 매일 밤).
+- 종단 시험은 서버 두 개를 띄운다(`REQUIRE_TEXLIVE=1` 이면 8797 에 진짜 컴파일 일꾼을 쓰는 세 번째 서버): 8799(기본)와 8798(약관 동의를 켠 서버, `e2e/terms.spec.ts` 만). 8799 포트에 남은 옛 서버를 재사용하므로, 다시 빌드한 뒤에는 `pkill -f "[s]erver/dist/main.js"` 로 끄고 돌린다. `PW_CHROMIUM_PATH` 로 크로미움을 지정할 수 있다. `REQUIRE_SOFFICE=1`(LibreOffice 필수)·`REQUIRE_HWP_SAMPLES=1` 이면 건너뛰지 않고 실패한다.
 - **큰 변경을 푸시하기 전 전체 검증**(CI 와 같다. 약 10분): typecheck → `npm test` → `RHWP_STUDIO_STRICT=1 npm run build` → corpus 시험 → `npm run check:licenses` → `REQUIRE_SOFFICE=1 REQUIRE_HWP_SAMPLES=1 npx playwright test` →
   `VITE_DISABLE_DOCX=1 npm run build` 후 `VITE_DISABLE_DOCX=1 npx playwright test e2e/docx-disabled.spec.ts e2e/home.spec.ts --project=desktop` → 일반 빌드로 되돌리기. 검증하는 동안에는 소스와 시험을 고치지 않는다(빌드가 섞인다).
-- 푸시 뒤에는 CI(`.github/workflows/ci.yml`: test, no-docx, docker)가 통과하는지 확인한다.
+- 푸시 뒤에는 CI(`.github/workflows/ci.yml`: test, no-docx, docker, 그리고 LaTeX 관련 파일이 바뀌면 `latex.yml`)가 통과하는지 확인한다.
 
 ## 한글(HWP) 엔진 메모 — `web/src/engines/hwp/`
 - `model.ts` 의 `HwpModel` 은 문서를 "문단 칸"으로 문서 순서대로 늘어놓고, 그 칸 번호가 AI 가 보는 문단 번호다. 칸 종류는 본문·표 칸·글상자·캡션·머리말·꼬리말·각주·미주다(파일 맨 위 주석에 순서 규칙이 있다).

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_COMPILE_LIMITS } from '@alldoc/shared';
 import { ADMIN_HELP, runAdmin, type AdminContext } from './admin';
 import { AuditLog } from './audit';
 import { AccountStore } from './auth/accounts';
@@ -9,7 +10,7 @@ import { LedgerStore } from './ledger';
 import { QuotaStore } from './quota';
 
 const NOW = Date.parse('2026-10-14T03:00:00Z');
-const limits = (perDay: number | null) => ({ aiRequestsPerDay: perDay, aiRequestsPerMonth: null, aiMaxDocChars: 120_000, aiCostCapMicroUsdPerMonth: null });
+const limits = (perDay: number | null) => ({ aiRequestsPerDay: perDay, aiRequestsPerMonth: null, aiMaxDocChars: 120_000, aiCostCapMicroUsdPerMonth: null, ...DEFAULT_COMPILE_LIMITS });
 const config = {
   plans: { defaultPlanId: 'free', list: [{ id: 'free', name: '무료', limits: limits(5) }, { id: 'pro', name: '프로', limits: limits(null) }] },
   timezone: 'Asia/Seoul',

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_COMPILE_LIMITS } from '@alldoc/shared';
 import { openDb } from '../db';
 import { EntitlementStore, monthStart } from './entitlements';
 
-const limits = (perDay: number | null) => ({ aiRequestsPerDay: perDay, aiRequestsPerMonth: null, aiMaxDocChars: 120_000, aiCostCapMicroUsdPerMonth: null });
+const limits = (perDay: number | null) => ({ aiRequestsPerDay: perDay, aiRequestsPerMonth: null, aiMaxDocChars: 120_000, aiCostCapMicroUsdPerMonth: null, ...DEFAULT_COMPILE_LIMITS });
 const config = {
   plans: {
     defaultPlanId: 'free',

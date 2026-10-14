@@ -8,6 +8,7 @@ import { deleteAccount } from './auth/deletion';
 import { monthStart, type EntitlementStore } from './billing/entitlements';
 import type { Config } from './config';
 import type { LedgerStore } from './ledger';
+import type { TexStore } from './tex/store';
 import { dayKey, type QuotaStore } from './quota';
 
 export const ADMIN_HELP = `사용법: admin.js <명령>
@@ -27,6 +28,8 @@ export interface AdminContext {
   entitlements: EntitlementStore;
   quota: QuotaStore;
   ledger: LedgerStore;
+  /** 탈퇴할 때 컴파일하려고 올린 파일 기록도 지운다 */
+  tex?: TexStore;
   audit: AuditLog;
   now: number;
   actor: string;
@@ -121,7 +124,7 @@ export function runAdmin(args: string[], ctx: AdminContext): string {
     case 'delete': {
       const a = need(a1);
       if (!args.includes('--yes')) throw new Error('되돌릴 수 없어요. 정말 지우려면 --yes 를 붙여 주세요.');
-      const r = deleteAccount({ accounts, entitlements, ledger: ctx.ledger, audit, secret: ctx.config.sessionSecret }, a.id, actor, now);
+      const r = deleteAccount({ accounts, entitlements, ledger: ctx.ledger, tex: ctx.tex, audit, secret: ctx.config.sessionSecret }, a.id, actor, now);
       return r ? `${a.id} 를 탈퇴시켰어요(원장 ${r.ledgerRows}줄 가명화).` : `${a.id} 는 이미 탈퇴했어요.`;
     }
     case 'audit':
@@ -147,6 +150,7 @@ if (process.argv[1] && /admin\.(js|ts)$/.test(process.argv[1])) {
   const { QuotaStore } = await import('./quota');
   const { LedgerStore } = await import('./ledger');
   const { AuditLog } = await import('./audit');
+  const { TexStore } = await import('./tex/store');
   let db;
   try {
     const config = loadConfig();
@@ -157,6 +161,7 @@ if (process.argv[1] && /admin\.(js|ts)$/.test(process.argv[1])) {
       entitlements: new EntitlementStore(db, config),
       quota: new QuotaStore(db),
       ledger: new LedgerStore(db),
+      tex: new TexStore(db, config.dataDir),
       audit: new AuditLog(db),
       now: Date.now(),
       actor: `admin-cli:${process.env.USER ?? process.env.HOSTNAME ?? 'unknown'}`,
