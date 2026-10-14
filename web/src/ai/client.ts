@@ -1,5 +1,6 @@
 // 서버(/api)와 대화하는 부분. AI 키는 서버에만 있고, 브라우저는 우리 서버에만 요청한다.
 import {
+  ACCOUNT_DELETE_CONFIRM,
   AiResponseSchema,
   ErrorResponseSchema,
   MeResponseSchema,
@@ -7,7 +8,7 @@ import {
   type AiResponse,
   type MeResponse,
 } from '@alldoc/shared';
-import type { ZodType } from 'zod';
+import { z, type ZodType } from 'zod';
 
 export class ApiError extends Error {
   constructor(
@@ -65,6 +66,17 @@ export function postPropose(body: AiRequest, signal?: AbortSignal): Promise<AiRe
     AiResponseSchema,
   );
 }
+
+const OkSchema = z.object({ ok: z.literal(true) });
+const postJson = (path: string, body: unknown) =>
+  request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, OkSchema);
+
+/** 약관(과 만 14세 이상) 동의 */
+export const postAgree = (version: string) => postJson('/api/account/agree', { version, age14: true });
+/** 모든 기기에서 로그아웃(이 기기 포함) */
+export const postLogoutAll = () => postJson('/api/account/logout-all', {});
+/** 계정 삭제 */
+export const postDeleteAccount = () => postJson('/api/account/delete', { confirm: ACCOUNT_DELETE_CONFIRM });
 
 export async function postLogout(): Promise<void> {
   await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => undefined);

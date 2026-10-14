@@ -162,8 +162,10 @@ describe('요금제 설정', () => {
   });
 
   it('전체 하루 비용 상한은 마이크로달러로, 약관 판은 주소와 함께 읽는다', () => {
-    const c = load({ default: 'free', plans: [plan('free')] }, { AI_DAILY_BUDGET_USD: '12.5', TERMS_VERSION: '2026-10', TERMS_URL: 'https://example.com/terms' });
+    const terms = { TERMS_VERSION: '2026-10', TERMS_URL: 'https://example.com/terms', PRIVACY_URL: 'https://example.com/privacy' };
+    const c = load({ default: 'free', plans: [plan('free')] }, { AI_DAILY_BUDGET_USD: '12.5', ...terms });
     expect(c.aiDailyBudgetMicroUsd).toBe(12_500_000);
-    expect(c.terms).toEqual({ version: '2026-10', termsUrl: 'https://example.com/terms', privacyUrl: null });
+    expect(c.terms).toEqual({ version: '2026-10', termsUrl: 'https://example.com/terms', privacyUrl: 'https://example.com/privacy' });
+    expect(problemsOf(() => load({ default: 'free', plans: [plan('free')] }, { TERMS_VERSION: '2026-10' })).join('\n')).toContain('PRIVACY_URL');
   });
 });

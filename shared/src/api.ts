@@ -60,8 +60,15 @@ export const MeResponseSchema = z.object({
   ai: z.object({ available: z.boolean(), demo: z.boolean(), provider: z.string() }),
   /** 이 사용자가 한 번에 보낼 수 있는 문서 글자 수(요금제마다 다름) */
   maxDocChars: z.number().int(),
+  /** 약관 동의. 서버에 약관 판(TERMS_VERSION)이 없으면 null. required 는 로그인한 사용자가 이 판에 아직 동의하지 않았는지 */
+  agreement: z
+    .object({ required: z.boolean(), version: z.string(), termsUrl: z.string().nullable(), privacyUrl: z.string().nullable() })
+    .nullable(),
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;
+
+export const AgreeRequestSchema = z.object({ version: z.string(), age14: z.literal(true) });
+export type AgreeRequest = z.infer<typeof AgreeRequestSchema>;
 
 /** 계정 삭제 요청에 함께 보내야 하는 확인 문구(실수로 지우지 않도록) */
 export const ACCOUNT_DELETE_CONFIRM = '계정 삭제';
@@ -83,5 +90,7 @@ export const ERROR_CODES = {
   /** 같은 사용자의 AI 요청이 아직 처리 중일 때 */
   busy: 'busy',
   forbidden: 'forbidden',
+  /** 약관(새 판)에 동의해야 쓸 수 있는 기능 */
+  agreementRequired: 'agreement_required',
   internal: 'internal',
 } as const;

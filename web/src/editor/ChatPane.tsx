@@ -4,6 +4,7 @@ import { askAi } from '../ai/actions';
 import { loginUrl } from '../ai/client';
 import { useLocation, Link } from 'react-router-dom';
 import { aiAvailability, useAuth } from '../state/auth';
+import { useTerms } from '../state/terms';
 import { useSettings } from '../state/settings';
 import { COVERAGE_NOTE } from './coverage';
 import { useEditor } from './store';
@@ -51,6 +52,11 @@ export default function ChatPane({ kind }: { kind: DocKind }) {
                 {me?.authMode === 'dev' ? '로그인(개발용)' : '구글로 로그인'}
               </a>
             </>
+          )}
+          {avail.reason === 'agreement' && (
+            <button type="button" className="btn primary" onClick={() => useTerms.getState().show()}>
+              약관 보고 동의하기
+            </button>
           )}
           {avail.reason === 'off' && (
             <Link className="btn primary" to="/settings">

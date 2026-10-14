@@ -495,6 +495,42 @@ describe('계정 API: 모든 기기 로그아웃·계정 삭제', () => {
   });
 });
 
+describe('약관 동의', () => {
+  const me = async (app: App, cookie: string) => (await (await app.request('/api/me', { headers: { cookie } })).json()) as MeResponse;
+  const agree = (app: App, cookie: string, body: unknown) =>
+    app.request('/api/account/agree', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
+
+  it('약관 판이 없는 서버는 동의를 묻지 않는다', async () => {
+    const { app } = setup();
+    const cookie = await login(app);
+    expect((await me(app, cookie)).agreement).toBeNull();
+    expect((await post(app, chatBody(), cookie)).status).toBe(200);
+  });
+
+  it('약관 판이 있으면 동의 전에는 AI 가 403 이고 횟수를 쓰지 않으며, 동의하면 쓸 수 있다', async () => {
+    const { app, quota } = setup({ TERMS_VERSION: '2026-10', TERMS_URL: 'https://example.com/terms', PRIVACY_URL: 'https://example.com/privacy' });
+    const cookie = await login(app);
+    expect((await me(app, cookie)).agreement).toEqual({ required: true, version: '2026-10', termsUrl: 'https://example.com/terms', privacyUrl: 'https://example.com/privacy' });
+    const blocked = await post(app, chatBody(), cookie);
+    expect(blocked.status).toBe(403);
+    expect((await errorOf(blocked)).code).toBe('agreement_required');
+    expect(quota.used('dev:테스터', '2026-10-01')).toBe(0);
+    expect((await agree(app, cookie, { version: '2026-10' })).status).toBe(400); // 만 14세 확인 없음
+    expect((await agree(app, cookie, { version: '2026-09', age14: true })).status).toBe(409); // 옛 판
+    expect((await agree(app, cookie, { version: '2026-10', age14: true })).status).toBe(200);
+    expect((await me(app, cookie)).agreement?.required).toBe(false);
+    expect((await post(app, chatBody(), cookie)).status).toBe(200);
+  });
+
+  it('약관 판이 바뀌면 다시 동의해야 한다', async () => {
+    const first = setup({ TERMS_VERSION: 'v1', TERMS_URL: 'https://example.com/t', PRIVACY_URL: 'https://example.com/p' });
+    const cookie = await login(first.app);
+    await agree(first.app, cookie, { version: 'v1', age14: true });
+    const next = createApp({ ...first.deps, config: testConfig({ WEB_DIST: first.config.webDist, TERMS_VERSION: 'v2', TERMS_URL: 'https://example.com/t', PRIVACY_URL: 'https://example.com/p' }) });
+    expect((await me(next, cookie)).agreement?.required).toBe(true);
+  });
+});
+
 describe('요금제와 한도', () => {
   const lim = (over: Record<string, unknown> = {}) => ({ aiRequestsPerDay: 2, aiRequestsPerMonth: null, aiMaxDocChars: 120_000, aiCostCapMicroUsdPerMonth: null, ...over });
   const plansFile = (free: Record<string, unknown> = {}) =>

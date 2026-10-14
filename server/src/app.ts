@@ -2,7 +2,7 @@ import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { compress } from 'hono/compress';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
-import { ACCOUNT_DELETE_CONFIRM, AiRequestSchema, ERROR_CODES, isAiTarget, MAX_DOC_CHARS, type AiResponse, type MeResponse, type Quota } from '@alldoc/shared';
+import { ACCOUNT_DELETE_CONFIRM, AgreeRequestSchema, AiRequestSchema, ERROR_CODES, isAiTarget, MAX_DOC_CHARS, type AiResponse, type MeResponse, type Quota } from '@alldoc/shared';
 import { toProposals } from './ai/convert';
 import type { Providers } from './ai/providers';
 import { ProviderFailedError, ProviderRefusedError, type ProviderUsage } from './ai/types';
@@ -67,7 +67,7 @@ export const CONTENT_SECURITY_POLICY = [
   "frame-ancestors 'self'",
 ].join('; ');
 
-function fail(c: Context, status: 400 | 401 | 403 | 404 | 413 | 422 | 429 | 500 | 502 | 503, code: string, message: string) {
+function fail(c: Context, status: 400 | 401 | 403 | 404 | 409 | 413 | 422 | 429 | 500 | 502 | 503, code: string, message: string) {
   return c.json({ error: { code, message } }, status);
 }
 
@@ -87,6 +87,9 @@ export function createApp(deps: AppDeps): Hono {
     if (!a || a.deletedAt !== null || a.status !== 'active' || a.sessionVersion !== s.sv) return null;
     return { id: a.id, name: a.name, email: a.email };
   };
+
+  /** 서버에 약관 판이 있고, 이 사용자가 그 판에 아직 동의하지 않았는지 */
+  const needsAgreement = (userId: string): boolean => config.terms !== null && accounts.get(userId)?.termsVersion !== config.terms.version;
 
   /** 로그인 처리: 계정을 만들거나 갱신하고 세션 쿠키를 준다. 차단된 계정이면 false. */
   const startSession = (c: Context, user: SessionUser): boolean => {
@@ -153,6 +156,9 @@ export function createApp(deps: AppDeps): Hono {
         provider: available[0]?.id ?? 'none',
       },
       maxDocChars: ent.limits.aiMaxDocChars,
+      agreement: config.terms
+        ? { required: user !== null && needsAgreement(user.id), version: config.terms.version, termsUrl: config.terms.termsUrl, privacyUrl: config.terms.privacyUrl }
+        : null,
     };
     return c.json(body);
   });
@@ -199,6 +205,18 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   // ---- 계정 ----
+  /** 약관(과 만 14세 이상) 동의. 지금 서버의 약관 판에만 동의할 수 있다. */
+  app.post('/api/account/agree', async (c) => {
+    const user = userOf(c);
+    if (!user) return fail(c, 401, ERROR_CODES.unauthenticated, '로그인이 필요해요.');
+    if (!config.terms) return fail(c, 400, ERROR_CODES.badRequest, '이 서버에는 동의할 약관이 없어요.');
+    const parsed = AgreeRequestSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return fail(c, 400, ERROR_CODES.badRequest, '만 14세 이상인지 확인하고 약관에 동의해 주세요.');
+    if (parsed.data.version !== config.terms.version) return fail(c, 409, ERROR_CODES.badRequest, '약관이 바뀌었어요. 새로 고침한 뒤 다시 동의해 주세요.');
+    accounts.agree(user.id, config.terms.version, now().getTime());
+    return c.json({ ok: true });
+  });
+
   /** 모든 기기에서 로그아웃: 세션 버전을 올려 이 계정의 모든 쿠키를 무효로 만든다(이 기기 포함). */
   app.post('/api/account/logout-all', (c) => {
     const user = userOf(c);
@@ -255,6 +273,7 @@ export function createApp(deps: AppDeps): Hono {
 
       const provider = providers[req.mode];
       if (!provider) return fail(c, 503, ERROR_CODES.aiUnavailable, '이 서버에는 AI가 연결되어 있지 않아요.');
+      if (user && needsAgreement(user.id)) return fail(c, 403, ERROR_CODES.agreementRequired, '이용약관에 동의한 뒤에 AI를 쓸 수 있어요.');
 
       // 요금제 → 글자 상한 → 전체 하루 비용 차단기 → (사용자) 진행 중 확인 → 월 횟수 → 월 원가 상한 → 하루 횟수 차감
       const day = dayKey(now(), config.timezone);

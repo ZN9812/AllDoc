@@ -57,8 +57,8 @@ export interface Config {
   plans: { defaultPlanId: string; list: Plan[] };
   /** 전체 하루 AI 원가 상한(마이크로달러). 넘으면 그날은 AI 를 멈춘다(503). null 이면 없음 */
   aiDailyBudgetMicroUsd: number | null;
-  /** 동의를 받아야 하는 약관 판. null 이면 동의를 받지 않는다(자체 설치 기본) */
-  terms: { version: string; termsUrl: string | null; privacyUrl: string | null } | null;
+  /** 동의를 받아야 하는 약관 판과 전문 주소. null 이면 동의를 받지 않는다(자체 설치 기본) */
+  terms: { version: string; termsUrl: string; privacyUrl: string } | null;
 }
 
 export const PlansFileSchema = z
@@ -241,6 +241,10 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
     };
   }
 
+  if (env.TERMS_VERSION && (!env.TERMS_URL || !env.PRIVACY_URL)) {
+    problems.push('TERMS_VERSION 을 쓰면 동의 화면에 보여 줄 TERMS_URL(이용약관)과 PRIVACY_URL(개인정보처리방침)도 넣어 주세요.');
+  }
+
   // 요금제 파일
   let plans: Config['plans'] = {
     defaultPlanId: 'free',
@@ -290,6 +294,6 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
     ai,
     plans,
     aiDailyBudgetMicroUsd: env.AI_DAILY_BUDGET_USD ? Math.round(env.AI_DAILY_BUDGET_USD * 1_000_000) : null,
-    terms: env.TERMS_VERSION ? { version: env.TERMS_VERSION, termsUrl: env.TERMS_URL ?? null, privacyUrl: env.PRIVACY_URL ?? null } : null,
+    terms: env.TERMS_VERSION && env.TERMS_URL && env.PRIVACY_URL ? { version: env.TERMS_VERSION, termsUrl: env.TERMS_URL, privacyUrl: env.PRIVACY_URL } : null,
   };
 }

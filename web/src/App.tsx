@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Link, Route, Routes, useParams, useSearchParams } from 'react-router-dom';
 import ConsentDialog from './components/ConsentDialog';
+import TermsDialog from './components/TermsDialog';
 import Toaster from './components/Toaster';
 import { applyTheme } from './lib/theme';
 import { useTitle } from './lib/useTitle';
@@ -30,12 +31,13 @@ function NotFound() {
   );
 }
 
-/** 로그인에 실패해 돌아왔을 때(/?login=failed) 한 번 알리고 주소를 깨끗하게 만든다. */
+/** 로그인에 실패해 돌아왔을 때(/?login=failed, 차단된 계정은 blocked) 한 번 알리고 주소를 깨끗하게 만든다. */
 function LoginNotice() {
   const [params, setParams] = useSearchParams();
   useEffect(() => {
-    if (params.get('login') !== 'failed') return;
-    toast('로그인하지 못했어요. 다시 시도해 주세요.', 'error');
+    const login = params.get('login');
+    if (login !== 'failed' && login !== 'blocked') return;
+    toast(login === 'blocked' ? '이 계정은 이용이 제한되어 있어요. 운영자에게 문의해 주세요.' : '로그인하지 못했어요. 다시 시도해 주세요.', 'error');
     const rest = new URLSearchParams(params);
     rest.delete('login');
     setParams(rest, { replace: true });
@@ -72,6 +74,7 @@ export default function App() {
       </Routes>
       <Toaster />
       <ConsentDialog />
+      <TermsDialog />
     </BrowserRouter>
   );
 }
