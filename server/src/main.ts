@@ -5,6 +5,7 @@ import { createProviders } from './ai/providers';
 import { ConfigError, loadConfig } from './config';
 import { loadDotEnv } from './dotenv';
 import { AccountStore } from './auth/accounts';
+import { EntitlementStore } from './billing/entitlements';
 import { openDb } from './db';
 import { LedgerStore } from './ledger';
 import { dayKey, QuotaStore } from './quota';
@@ -29,10 +30,11 @@ try {
 const db = openDb(join(config.dataDir, 'alldoc.sqlite'));
 const quota = new QuotaStore(db);
 const accounts = new AccountStore(db);
+const entitlements = new EntitlementStore(db, config);
 // AI 사용량 원장. 원가 집계에 쓰므로 지우지 않는다(보고: server/dist/ledger-report.js).
 const ledger = new LedgerStore(db);
 const providers = createProviders(config);
-const app = createApp({ config, quota, accounts, providers, ledger });
+const app = createApp({ config, quota, accounts, entitlements, providers, ledger });
 
 // 지난 사용 기록은 62일 뒤에 지운다(요금제의 월 한도를 계산하려면 이번 달 기록이 있어야 한다).
 const prune = () => {
@@ -45,7 +47,10 @@ pruneTimer.unref();
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`서버가 ${config.publicUrl} (포트 ${info.port})에서 실행 중입니다.`);
-  console.log(`로그인 방식: ${config.authMode} · 하루 AI 한도: ${config.authMode === 'none' ? '없음' : `${config.dailyLimit}회`} (${config.timezone})`);
+  const plan = config.plans.list.find((p) => p.id === config.plans.defaultPlanId);
+  const perDay = plan?.limits.aiRequestsPerDay;
+  console.log(`로그인 방식: ${config.authMode} · 기본 요금제: ${config.authMode === 'none' ? '없음(한도 없음)' : `${plan?.name} · 하루 AI ${perDay === null ? '제한 없음' : `${perDay}회`}`} (${config.timezone})`);
+  if (config.aiDailyBudgetMicroUsd !== null) console.log(`AI 전체 하루 비용 상한: $${config.aiDailyBudgetMicroUsd / 1_000_000}`);
   for (const mode of ['chat', 'format_check'] as const) {
     const p = providers[mode];
     const s = config.ai[mode];

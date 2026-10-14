@@ -7,6 +7,7 @@ import { createApp, type AppDeps } from './app';
 import { MockProvider } from './ai/mock';
 import { ProviderFailedError, ProviderRefusedError, type AiProvider, type ProviderResult } from './ai/types';
 import { AccountStore } from './auth/accounts';
+import { EntitlementStore } from './billing/entitlements';
 import { openDb } from './db';
 import { LedgerStore } from './ledger';
 import { QuotaStore } from './quota';
@@ -28,18 +29,20 @@ function setup(env: Record<string, string> = {}, over: Partial<AppDeps> = {}) {
   const db = openDb(':memory:');
   const quota = new QuotaStore(db);
   const accounts = new AccountStore(db);
+  const entitlements = new EntitlementStore(db, config);
   const provider = new MockProvider();
   const deps: AppDeps = {
     config,
     quota,
     accounts,
+    entitlements,
     providers: { chat: provider, format_check: provider },
     now: () => NOW,
     log: () => undefined,
     ...over,
   };
   const app = createApp(deps);
-  return { app, quota, accounts, db, config, deps };
+  return { app, quota, accounts, entitlements, db, config, deps };
 }
 
 type App = ReturnType<typeof setup>['app'];
@@ -448,6 +451,104 @@ describe('계정과 세션 무효화', () => {
     const cookie = await login(app);
     db.exec('DELETE FROM users');
     expect((await me(app, cookie)).authenticated).toBe(false);
+  });
+});
+
+describe('요금제와 한도', () => {
+  const lim = (over: Record<string, unknown> = {}) => ({ aiRequestsPerDay: 2, aiRequestsPerMonth: null, aiMaxDocChars: 120_000, aiCostCapMicroUsdPerMonth: null, ...over });
+  const plansFile = (free: Record<string, unknown> = {}) =>
+    JSON.stringify({ default: 'free', plans: [{ id: 'free', name: '무료', limits: lim(free) }, { id: 'pro', name: '프로', limits: lim({ aiRequestsPerDay: null }) }] });
+  const withPlans = (free: Record<string, unknown> = {}, env: Record<string, string> = {}, over: Partial<AppDeps> = {}) => {
+    const dist = mkdtempSync(join(tmpdir(), 'alldoc-web-'));
+    writeFileSync(join(dist, 'index.html'), '<!doctype html>');
+    const config = testConfig({ WEB_DIST: dist, PLANS_CONFIG_PATH: '/srv/plans.json', ...env }, { 'plans.json': plansFile(free) });
+    const db = openDb(':memory:');
+    const deps: AppDeps = {
+      config,
+      quota: new QuotaStore(db),
+      accounts: new AccountStore(db),
+      entitlements: new EntitlementStore(db, config),
+      providers: { chat: new MockProvider(), format_check: new MockProvider() },
+      now: () => NOW,
+      log: () => undefined,
+      ...over,
+    };
+    return { app: createApp(deps), deps, db };
+  };
+  const me = async (app: App, cookie: string) => (await (await app.request('/api/me', { headers: { cookie } })).json()) as MeResponse;
+
+  it('내 정보에 요금제와 오늘·이번 달 사용 횟수가 나온다', async () => {
+    const { app } = withPlans();
+    const cookie = await login(app);
+    await post(app, chatBody(), cookie);
+    expect(await me(app, cookie)).toMatchObject({
+      quota: { limit: 2, used: 1, remaining: 1 },
+      plan: { id: 'free', name: '무료', source: 'default', aiRequestsPerDay: 2 },
+      usage: { aiToday: 1, aiThisMonth: 1 },
+    });
+  });
+
+  it('관리자가 요금제를 수동으로 주면 한도가 오른다(하루 한도 없는 요금제는 남은 횟수를 보이지 않는다)', async () => {
+    const { app, deps } = withPlans();
+    const cookie = await login(app);
+    for (let i = 0; i < 2; i++) expect((await post(app, chatBody(), cookie)).status).toBe(200);
+    expect((await post(app, chatBody(), cookie)).status).toBe(429);
+    deps.entitlements.grant('dev:테스터', 'pro', null, '베타', 'admin-cli', NOW.getTime());
+    expect((await post(app, chatBody(), cookie)).status).toBe(200);
+    expect(await me(app, cookie)).toMatchObject({ quota: null, plan: { id: 'pro', source: 'override' }, usage: { aiToday: 3 } });
+  });
+
+  it('월 한도를 넘으면 429 이고 하루 횟수를 쓰지 않는다', async () => {
+    const { app, deps } = withPlans({ aiRequestsPerDay: 10, aiRequestsPerMonth: 3 });
+    const cookie = await login(app);
+    deps.quota.consume('dev:테스터', '2026-09-30', 99); // 지난달 기록은 세지 않는다
+    deps.quota.consume('dev:테스터', '2026-10-01', 99);
+    deps.quota.consume('dev:테스터', '2026-10-01', 99);
+    expect((await post(app, chatBody(), cookie)).status).toBe(200); // 이번 달 3번째
+    const res = await post(app, chatBody(), cookie);
+    expect(res.status).toBe(429);
+    expect((await errorOf(res)).message).toContain('이번 달 쓸 수 있는 AI 횟수(3회)');
+    expect(deps.quota.used('dev:테스터', '2026-10-01')).toBe(3);
+  });
+
+  it('요금제의 글자 상한을 넘는 문서는 413', async () => {
+    const { app } = withPlans({ aiMaxDocChars: 5 });
+    const cookie = await login(app);
+    const res = await post(app, chatBody(), cookie); // 문서 글 "몇일 뒤에 만나요" 9자
+    expect(res.status).toBe(413);
+    expect((await errorOf(res)).message).toContain('5자까지');
+    expect((await me(app, cookie)).maxDocChars).toBe(5);
+  });
+
+  it('사용자의 이번 달 원가가 숨은 상한에 닿으면 429', async () => {
+    const db = openDb(':memory:');
+    const ledger = new LedgerStore(db);
+    const { app } = withPlans({ aiCostCapMicroUsdPerMonth: 100_000 }, {}, { ledger });
+    const cookie = await login(app);
+    const usage = { modelRequested: 'claude-opus-5-5', modelServed: 'claude-opus-5-5', fallback: false, parts: [{ model: 'claude-opus-5-5', inputTokens: 20_000, outputTokens: 3_000, cacheWriteTokens: 0, cacheWrite1hTokens: 0, cacheReadTokens: 0 }] };
+    ledger.recordAi({ at: 0, day: '2026-10-01', userId: 'dev:테스터', planId: 'free', task: 'chat', provider: 'anthropic', modelRequested: 'claude-opus-5-5', usage, docChars: 1, proposals: 0, dropped: 0, ms: 1, outcome: 'ok' });
+    const res = await post(app, chatBody(), cookie);
+    expect(res.status).toBe(429);
+    expect((await errorOf(res)).message).toContain('이번 달 AI 사용량이 많아');
+  });
+
+  it('전체 하루 비용 상한에 닿으면 모두에게 503 이고 횟수를 쓰지 않는다', async () => {
+    const db = openDb(':memory:');
+    const ledger = new LedgerStore(db);
+    const { app, deps } = withPlans({}, { AI_DAILY_BUDGET_USD: '0.1' }, { ledger });
+    const cookie = await login(app);
+    const usage = { modelRequested: 'claude-opus-5-5', modelServed: 'claude-opus-5-5', fallback: false, parts: [{ model: 'claude-opus-5-5', inputTokens: 20_000, outputTokens: 3_000, cacheWriteTokens: 0, cacheWrite1hTokens: 0, cacheReadTokens: 0 }] };
+    ledger.recordAi({ at: 0, day: '2026-10-01', userId: 'g:다른 사람', planId: 'free', task: 'chat', provider: 'anthropic', modelRequested: 'claude-opus-5-5', usage, docChars: 1, proposals: 0, dropped: 0, ms: 1, outcome: 'ok' });
+    const res = await post(app, chatBody(), cookie);
+    expect(res.status).toBe(503);
+    expect(deps.quota.used('dev:테스터', '2026-10-01')).toBe(0);
+  });
+
+  it('원장에 요청 당시 요금제를 남긴다', async () => {
+    const db = openDb(':memory:');
+    const { app } = withPlans({}, {}, { ledger: new LedgerStore(db) });
+    await post(app, chatBody(), await login(app));
+    expect(db.prepare('SELECT plan_id FROM ai_events').get()).toEqual({ plan_id: 'free' });
   });
 });
 

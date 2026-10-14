@@ -2,7 +2,7 @@ import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { compress } from 'hono/compress';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
-import { AiRequestSchema, ERROR_CODES, isAiTarget, MAX_DOC_CHARS, type AiResponse, type MeResponse } from '@alldoc/shared';
+import { AiRequestSchema, ERROR_CODES, isAiTarget, MAX_DOC_CHARS, type AiResponse, type MeResponse, type Quota } from '@alldoc/shared';
 import { toProposals } from './ai/convert';
 import type { Providers } from './ai/providers';
 import { ProviderFailedError, ProviderRefusedError, type ProviderUsage } from './ai/types';
@@ -22,6 +22,7 @@ import {
   type SessionUser,
 } from './auth/session';
 import type { AccountStore } from './auth/accounts';
+import { monthStart, type EntitlementStore } from './billing/entitlements';
 import type { Config } from './config';
 import type { AiOutcome, LedgerStore } from './ledger';
 import { dayKey, quotaOf, type QuotaStore } from './quota';
@@ -31,6 +32,7 @@ export interface AppDeps {
   config: Config;
   quota: QuotaStore;
   accounts: AccountStore;
+  entitlements: EntitlementStore;
   providers: Providers;
   /** AI 사용량 원장. 없으면 남기지 않는다(시험 등). */
   ledger?: LedgerStore;
@@ -67,7 +69,7 @@ function fail(c: Context, status: 400 | 401 | 403 | 404 | 413 | 422 | 429 | 500 
 }
 
 export function createApp(deps: AppDeps): Hono {
-  const { config, quota, accounts, providers } = deps;
+  const { config, quota, accounts, entitlements, providers } = deps;
   const now = deps.now ?? (() => new Date());
   const log = deps.log ?? ((m: string, extra?: Record<string, unknown>) => console.log(extra ? `${m} ${JSON.stringify(extra)}` : m));
   const app = new Hono();
@@ -129,17 +131,25 @@ export function createApp(deps: AppDeps): Hono {
     const user = userOf(c);
     const day = dayKey(now(), config.timezone);
     const available = (['chat', 'format_check'] as const).map((m) => providers[m]).filter((p): p is NonNullable<typeof p> => p !== null);
+    // 로그인 전(로그인이 필요한 설치)에는 기본 요금제의 글자 상한을 알려 준다.
+    const ent = entitlements.resolve(user ? user.id : config.authMode === 'none' ? null : '', now().getTime());
+    const usedToday = user ? quota.used(user.id, day) : 0;
+    const perDay = ent.limits.aiRequestsPerDay;
     const body: MeResponse = {
       authMode: config.authMode,
       authenticated: user !== null,
       user: user ? { name: user.name, email: user.email, picture: null } : null,
-      quota: user ? quotaOf(quota.used(user.id, day), config.dailyLimit) : null,
+      quota: user && perDay !== null ? quotaOf(usedToday, perDay) : null,
+      plan: user
+        ? { id: ent.planId, name: ent.planName, source: ent.source, validUntil: ent.validUntil, aiRequestsPerDay: perDay, aiRequestsPerMonth: ent.limits.aiRequestsPerMonth }
+        : null,
+      usage: user ? { aiToday: usedToday, aiThisMonth: quota.usedBetween(user.id, monthStart(day), day) } : null,
       ai: {
         available: available.length > 0,
         demo: available.length > 0 && available.every((p) => p.demo),
         provider: available[0]?.id ?? 'none',
       },
-      maxDocChars: MAX_DOC_CHARS,
+      maxDocChars: ent.limits.aiMaxDocChars,
     };
     return c.json(body);
   });
@@ -221,15 +231,34 @@ export function createApp(deps: AppDeps): Hono {
       const provider = providers[req.mode];
       if (!provider) return fail(c, 503, ERROR_CODES.aiUnavailable, '이 서버에는 AI가 연결되어 있지 않아요.');
 
+      // 요금제 → 글자 상한 → 전체 하루 비용 차단기 → (사용자) 진행 중 확인 → 월 횟수 → 월 원가 상한 → 하루 횟수 차감
       const day = dayKey(now(), config.timezone);
+      const ent = entitlements.resolve(user?.id ?? null, now().getTime());
+      const lim = ent.limits;
+      if (chars > lim.aiMaxDocChars) {
+        return fail(c, 413, ERROR_CODES.tooLarge, `문서가 너무 길어요(${chars.toLocaleString('ko-KR')}자). 지금 요금제(${ent.planName})로는 한 번에 ${lim.aiMaxDocChars.toLocaleString('ko-KR')}자까지 보낼 수 있어요.`);
+      }
+      if (config.aiDailyBudgetMicroUsd !== null && deps.ledger && deps.ledger.dayCost(day) >= config.aiDailyBudgetMicroUsd) {
+        log('AI 전체 하루 비용 상한에 닿아 요청을 멈춤', { day, budgetMicroUsd: config.aiDailyBudgetMicroUsd });
+        return fail(c, 503, ERROR_CODES.aiUnavailable, '오늘은 AI 사용량이 많아 잠시 멈췄어요. 내일 0시 뒤에 다시 시도해 주세요.');
+      }
       if (user) {
         if (inflight.has(user.id)) return fail(c, 429, ERROR_CODES.busy, '이전 AI 요청을 처리하는 중이에요. 끝난 뒤에 다시 시도해 주세요.');
-        const r = quota.consume(user.id, day, config.dailyLimit);
+        const month = monthStart(day);
+        if (lim.aiRequestsPerMonth !== null && quota.usedBetween(user.id, month, day) >= lim.aiRequestsPerMonth) {
+          return fail(c, 429, ERROR_CODES.quotaExceeded, `이번 달 쓸 수 있는 AI 횟수(${lim.aiRequestsPerMonth}회)를 모두 사용했어요. 다음 달 1일에 다시 쓸 수 있어요.`);
+        }
+        if (lim.aiCostCapMicroUsdPerMonth !== null && deps.ledger && deps.ledger.userCost(user.id, month, day) >= lim.aiCostCapMicroUsdPerMonth) {
+          log('사용자 월 원가 상한에 닿음', { user: user.id, plan: ent.planId });
+          return fail(c, 429, ERROR_CODES.quotaExceeded, '이번 달 AI 사용량이 많아 다음 달 1일까지 AI를 쓸 수 없어요. 계속 써야 한다면 문의해 주세요.');
+        }
+        const r = quota.consume(user.id, day, lim.aiRequestsPerDay ?? Number.MAX_SAFE_INTEGER);
         if (!r.ok) {
-          return fail(c, 429, ERROR_CODES.quotaExceeded, `오늘 쓸 수 있는 AI 횟수(${config.dailyLimit}회)를 모두 사용했어요. 내일 0시(${config.timezone})에 다시 쓸 수 있어요.`);
+          return fail(c, 429, ERROR_CODES.quotaExceeded, `오늘 쓸 수 있는 AI 횟수(${lim.aiRequestsPerDay}회)를 모두 사용했어요. 내일 0시(${config.timezone})에 다시 쓸 수 있어요.`);
         }
         inflight.add(user.id);
       }
+      const quotaNow = (): Quota | null => (user && lim.aiRequestsPerDay !== null ? quotaOf(quota.used(user.id, day), lim.aiRequestsPerDay) : null);
 
       const started = Date.now();
       /** 원장에 한 줄 남긴다. 원장 기록이 실패해도 사용자 응답은 막지 않는다. 원가(마이크로달러)를 돌려준다. */
@@ -240,6 +269,7 @@ export function createApp(deps: AppDeps): Hono {
             at: now().getTime(),
             day,
             userId: user?.id ?? null,
+            planId: ent.planId,
             task: req.mode,
             provider: provider.id,
             modelRequested: usage?.modelRequested ?? (provider.demo ? 'mock' : config.ai[req.mode].model),
@@ -267,7 +297,7 @@ export function createApp(deps: AppDeps): Hono {
           reply,
           proposals,
           demo: provider.demo,
-          quota: user ? quotaOf(quota.used(user.id, day), config.dailyLimit) : null,
+          quota: quotaNow(),
         };
         return c.json(out);
       } catch (e) {

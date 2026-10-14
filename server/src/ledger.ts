@@ -13,6 +13,8 @@ export interface AiEventInput {
   day: string;
   /** 로그인 없이 쓰는 설치(AUTH_MODE=none)는 null */
   userId: string | null;
+  /** 요청 당시의 요금제(로그인 없는 설치는 anonymous) */
+  planId: string | null;
   task: AiMode;
   provider: string;
   /** 사용량을 받지 못한 실패에서도 어떤 모델에 보냈는지 남긴다 */
@@ -59,9 +61,9 @@ export class LedgerStore {
     private readonly warn: (message: string) => void = (m) => console.warn(m),
   ) {
     this.insertStmt = this.db.prepare(
-      `INSERT INTO ai_events (at, day, user_id, task, provider, model_requested, model_served, fallback,
+      `INSERT INTO ai_events (at, day, user_id, plan_id, task, provider, model_requested, model_served, fallback,
         input_tokens, output_tokens, cache_write_tokens, cache_read_tokens, cost_micro_usd, doc_chars, proposals, dropped, ms, outcome)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     this.userCostStmt = this.db.prepare('SELECT COALESCE(SUM(cost_micro_usd), 0) AS n FROM ai_events WHERE user_id = ? AND day >= ? AND day <= ?');
     this.dayCostStmt = this.db.prepare('SELECT COALESCE(SUM(cost_micro_usd), 0) AS n FROM ai_events WHERE day = ?');
@@ -98,7 +100,7 @@ export class LedgerStore {
     }
     const u = e.usage;
     this.insertStmt.run(
-      e.at, e.day, e.userId, e.task, e.provider, e.modelRequested, u?.modelServed ?? null, u?.fallback ? 1 : 0,
+      e.at, e.day, e.userId, e.planId, e.task, e.provider, e.modelRequested, u?.modelServed ?? null, u?.fallback ? 1 : 0,
       u ? sum.input : null, u ? sum.output : null, u ? sum.cacheWrite : null, u ? sum.cacheRead : null, cost,
       e.docChars, e.proposals, e.dropped, e.ms, e.outcome,
     );

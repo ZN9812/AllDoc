@@ -19,6 +19,7 @@ const event = (over: Partial<AiEventInput> = {}): AiEventInput => ({
   at: 1,
   day: '2026-10-01',
   userId: 'dev:테스터',
+  planId: 'free',
   task: 'chat',
   provider: 'anthropic',
   modelRequested: 'claude-opus-5-5',

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { AUTH_MODES, type AiMode, type AuthMode } from '@alldoc/shared';
+import { AUTH_MODES, MAX_DOC_CHARS, PlanSchema, type AiMode, type AuthMode, type Plan } from '@alldoc/shared';
 import { buildSystemPrompt } from './ai/prompt';
 
 export class ConfigError extends Error {
@@ -48,13 +48,26 @@ export interface Config {
   sessionSecret: string;
   authMode: AuthMode;
   google: { clientId: string; clientSecret: string } | null;
-  dailyLimit: number;
   timezone: string;
   dataDir: string;
   webDist: string;
   allowedOrigins: string[];
   ai: Record<AiMode, AiTaskSettings>;
+  /** 요금제 목록과 기본 요금제. PLANS_CONFIG_PATH 가 없으면 DAILY_AI_LIMIT 로 만든 free 하나 */
+  plans: { defaultPlanId: string; list: Plan[] };
+  /** 전체 하루 AI 원가 상한(마이크로달러). 넘으면 그날은 AI 를 멈춘다(503). null 이면 없음 */
+  aiDailyBudgetMicroUsd: number | null;
+  /** 동의를 받아야 하는 약관 판. null 이면 동의를 받지 않는다(자체 설치 기본) */
+  terms: { version: string; termsUrl: string | null; privacyUrl: string | null } | null;
 }
+
+export const PlansFileSchema = z
+  .object({
+    /** 로그인한 사용자가 기본으로 받는 요금제 id */
+    default: z.string(),
+    plans: z.array(PlanSchema).min(1),
+  })
+  .strict();
 
 const blank = (v: string | undefined) => (v === undefined || v.trim() === '' ? undefined : v.trim());
 
@@ -71,6 +84,11 @@ const EnvSchema = z.object({
   AI_PROVIDER: z.enum(PROVIDER_IDS).default('anthropic'),
   ANTHROPIC_API_KEY: z.string().optional(),
   AI_CONFIG_PATH: z.string().optional(),
+  PLANS_CONFIG_PATH: z.string().optional(),
+  AI_DAILY_BUDGET_USD: z.coerce.number().positive().optional(),
+  TERMS_VERSION: z.string().max(40).optional(),
+  TERMS_URL: z.url().optional(),
+  PRIVACY_URL: z.url().optional(),
   DATA_DIR: z.string().default('./data'),
   WEB_DIST: z.string().optional(),
   ALLOWED_ORIGINS: z.string().optional(),
@@ -223,6 +241,26 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
     };
   }
 
+  // 요금제 파일
+  let plans: Config['plans'] = {
+    defaultPlanId: 'free',
+    list: [{ id: 'free', name: '무료', limits: { aiRequestsPerDay: env.DAILY_AI_LIMIT, aiRequestsPerMonth: null, aiMaxDocChars: MAX_DOC_CHARS, aiCostCapMicroUsdPerMonth: null } }],
+  };
+  if (env.PLANS_CONFIG_PATH) {
+    try {
+      const r = PlansFileSchema.safeParse(JSON.parse(deps.readFile(resolve(env.PLANS_CONFIG_PATH))));
+      if (!r.success) problems.push(...issues(`요금제 파일(${env.PLANS_CONFIG_PATH})`, r.error));
+      else {
+        const ids = r.data.plans.map((p) => p.id);
+        if (new Set(ids).size !== ids.length) problems.push(`요금제 파일(${env.PLANS_CONFIG_PATH}): 요금제 id 가 겹쳐요.`);
+        if (!ids.includes(r.data.default)) problems.push(`요금제 파일(${env.PLANS_CONFIG_PATH}): 기본 요금제 "${r.data.default}" 가 plans 에 없어요.`);
+        plans = { defaultPlanId: r.data.default, list: r.data.plans };
+      }
+    } catch (e) {
+      problems.push(`요금제 파일(${env.PLANS_CONFIG_PATH})을 읽지 못했어요: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   if (problems.length > 0) throw new ConfigError(problems);
 
   const origins = new Set<string>([new URL(publicUrl).origin]);
@@ -245,11 +283,13 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
     sessionSecret: sessionSecret ?? '',
     authMode: env.AUTH_MODE,
     google,
-    dailyLimit: env.DAILY_AI_LIMIT,
     timezone: env.APP_TIMEZONE,
     dataDir: resolve(env.DATA_DIR),
     webDist: resolve(env.WEB_DIST ?? resolve(deps.moduleDir, '../../web/dist')),
     allowedOrigins: [...origins],
     ai,
+    plans,
+    aiDailyBudgetMicroUsd: env.AI_DAILY_BUDGET_USD ? Math.round(env.AI_DAILY_BUDGET_USD * 1_000_000) : null,
+    terms: env.TERMS_VERSION ? { version: env.TERMS_VERSION, termsUrl: env.TERMS_URL ?? null, privacyUrl: env.PRIVACY_URL ?? null } : null,
   };
 }

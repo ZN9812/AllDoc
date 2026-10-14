@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { DocSummarySchema, StyleProfileSchema } from './style';
 import { ProposalSchema } from './ops';
+import { PlanInfoSchema } from './billing';
 
-/** AI 요청 한 번에 보낼 수 있는 문서 글자 수 상한(넘으면 범위를 줄여 달라고 안내한다) */
-export const MAX_DOC_CHARS = 120_000;
+export { MAX_DOC_CHARS } from './limits';
 
 export const AI_MODES = ['chat', 'format_check'] as const;
 export type AiMode = (typeof AI_MODES)[number];
@@ -52,8 +52,13 @@ export const MeResponseSchema = z.object({
   authMode: z.enum(AUTH_MODES),
   authenticated: z.boolean(),
   user: z.object({ name: z.string().nullable(), email: z.string().nullable(), picture: z.string().nullable() }).nullable(),
+  /** 오늘 남은 횟수(하루 한도가 없는 요금제·로그인 전이면 null) */
   quota: QuotaSchema.nullable(),
+  /** 로그인한 사용자의 요금제와 이번 달 사용 횟수(로그인 전이면 null) */
+  plan: PlanInfoSchema.nullable(),
+  usage: z.object({ aiToday: z.number().int(), aiThisMonth: z.number().int() }).nullable(),
   ai: z.object({ available: z.boolean(), demo: z.boolean(), provider: z.string() }),
+  /** 이 사용자가 한 번에 보낼 수 있는 문서 글자 수(요금제마다 다름) */
   maxDocChars: z.number().int(),
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;
