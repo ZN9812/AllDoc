@@ -1,6 +1,8 @@
 import { countBySeverity, type TexDiagnostic } from '@alldoc/shared';
+import { fixTexErrors } from '../ai/actions';
 import { loginUrl } from '../ai/client';
-import { compileAvailability, useAuth } from '../state/auth';
+import { useSettings } from '../state/settings';
+import { aiAvailability, compileAvailability, useAuth } from '../state/auth';
 import { useTerms } from '../state/terms';
 import { texCompileNote } from './coverage';
 import { useEditor } from './store';
@@ -11,8 +13,11 @@ const SEVERITY_LABEL: Record<TexDiagnostic['severity'], string> = { error: '오�
 /** LaTeX 컴파일 탭: 컴파일 단추, 오류·경고 목록(누르면 그 파일·줄로), 원본 로그 */
 export default function CompilePane() {
   const me = useAuth((s) => s.me);
-  const { phase, result, error, compile, jumpTo } = useTex();
+  const { phase, result, error, compile, jumpTo, regression } = useTex();
   const closeSheet = useEditor((s) => s.closeSheet);
+  const aiBusy = useEditor((s) => s.busy);
+  const aiEnabled = useSettings((s) => s.aiEnabled);
+  const aiOk = aiAvailability(me, aiEnabled).ok;
   const avail = compileAvailability(me);
   const busy = isBusy(phase);
   const ds = result?.diagnostics ?? [];
@@ -50,6 +55,11 @@ export default function CompilePane() {
               {error}
             </p>
           )}
+          {regression && (
+            <p className="compile-err" role="alert" data-testid="compile-regression">
+              AI 제안을 적용한 뒤 오류가 {regression.before}개에서 {regression.after}개로 늘었어요. 변경 내역에서 적용한 제안을 되돌릴 수 있어요.
+            </p>
+          )}
           {result && (
             <>
               <p className="compile-sum" data-testid="compile-summary">
@@ -59,6 +69,11 @@ export default function CompilePane() {
                 {result.status === 'too_large' && '만든 PDF나 로그가 너무 커서 받지 못했어요.'}
                 {result.status === 'failed' && '컴파일 서버에 문제가 생겼어요.'} 오류 {c.error} · 경고 {c.warning}
               </p>
+              {result.status !== 'ok' && aiOk && (
+                <button type="button" className="btn sm" disabled={busy || aiBusy} onClick={() => void fixTexErrors()}>
+                  {aiBusy ? 'AI가 살펴보는 중…' : 'AI로 오류 고치기'}
+                </button>
+              )}
               {ds.length > 0 && (
                 <ul className="diag" aria-label="오류와 경고">
                   {ds.map((d, i) => {

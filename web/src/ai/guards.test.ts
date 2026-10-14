@@ -122,4 +122,19 @@ describe('제안에 위치 붙이기', () => {
     const list = [proposal('a', 0)];
     expect(attachPlaces(list, plain)).toBe(list);
   });
+
+  it('LaTeX 원고는 파일·줄을 붙인다(한 블록, 한 파일 여러 블록, 여러 파일)', () => {
+    const src = (file: string, line: number) => ({ file, line, role: 'body' as const });
+    const tex: DocSummary = {
+      kind: 'tex',
+      paragraphs: [
+        { index: 100000, text: '글 하나', char: {}, para: {}, src: src('main.tex', 4) },
+        { index: 100001, text: '글 둘', char: {}, para: {}, src: src('main.tex', 9) },
+        { index: 1, text: '글 셋', char: {}, para: {}, src: src('ch/a.tex', 2) },
+      ],
+    };
+    const multi = (id: string, ps: number[]): Proposal => ({ ...proposal(id, ps[0] as number), ops: ps.map((paragraph) => ({ type: 'replaceText' as const, paragraph, find: '글', replace: '말' })) });
+    const out = attachPlaces([proposal('a', 100001), multi('b', [100000, 100001]), multi('c', [100000, 1])], tex);
+    expect(out.map((p) => p.place)).toEqual(['main.tex 9행', 'main.tex 2곳', '파일 2개 2곳']);
+  });
 });

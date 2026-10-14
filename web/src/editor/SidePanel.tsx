@@ -11,8 +11,12 @@ const DOC_TABS: Array<{ id: Tab; label: string }> = [
   { id: 'format', label: '서식 점검' },
   { id: 'changes', label: '변경 내역' },
 ];
-/** LaTeX 는 컴파일 탭만 둔다(AI 대화·변경 내역은 M3 에서 더한다, docs/LATEX.md) */
-const TEX_TABS: Array<{ id: Tab; label: string }> = [{ id: 'compile', label: '컴파일' }];
+/** LaTeX 는 서식 점검 대신 컴파일 탭을 둔다(docs/LATEX.md) */
+const TEX_TABS: Array<{ id: Tab; label: string }> = [
+  { id: 'chat', label: 'AI 대화' },
+  { id: 'compile', label: '컴파일' },
+  { id: 'changes', label: '변경 내역' },
+];
 
 export const tabsFor = (kind: DocKind): Array<{ id: Tab; label: string }> => (kind === 'tex' ? TEX_TABS : DOC_TABS);
 
@@ -43,14 +47,14 @@ export default function SidePanel({ kind }: { kind: DocKind }) {
   };
 
   return (
-    <aside className={`side${open ? ' open' : ''}`} aria-label={kind === 'tex' ? '컴파일' : 'AI 도우미'} data-testid="side-panel">
+    <aside className={`side${open ? ' open' : ''}`} aria-label="AI 도우미" data-testid="side-panel">
       <div className="sheet-h">
-        <span>{kind === 'tex' ? '컴파일' : 'AI 도우미'}</span>
+        <span>AI 도우미</span>
         <button type="button" className="btn ghost sm" onClick={closeSheet}>
           닫기
         </button>
       </div>
-      <div className="tabs" role="tablist" aria-label={kind === 'tex' ? '컴파일 탭' : 'AI 도우미 탭'}>
+      <div className="tabs" role="tablist" aria-label="AI 도우미 탭">
         {TABS.map((t, i) => (
           <button
             key={t.id}
@@ -72,15 +76,10 @@ export default function SidePanel({ kind }: { kind: DocKind }) {
           </button>
         ))}
       </div>
-      {kind === 'tex' ? (
-        tab === 'compile' && <CompilePane />
-      ) : (
-        <>
-          {tab === 'chat' && <ChatPane kind={kind} />}
-          {tab === 'format' && <FormatPane kind={kind} />}
-          {tab === 'changes' && <ChangesPane />}
-        </>
-      )}
+      {tab === 'chat' && <ChatPane kind={kind} />}
+      {tab === 'format' && kind !== 'tex' && <FormatPane kind={kind} />}
+      {tab === 'compile' && kind === 'tex' && <CompilePane />}
+      {tab === 'changes' && <ChangesPane />}
     </aside>
   );
 }

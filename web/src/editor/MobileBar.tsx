@@ -14,23 +14,21 @@ export default function MobileBar({ kind }: { kind: DocKind }) {
         </span>
       )}
       <span className="sp" />
+      <button type="button" className="btn ghost sm" onClick={() => openSheet('chat')}>
+        AI 대화
+      </button>
       {kind === 'tex' ? (
         <button type="button" className="btn ghost sm" onClick={() => openSheet('compile')}>
           컴파일 결과
         </button>
       ) : (
-        <>
-          <button type="button" className="btn ghost sm" onClick={() => openSheet('chat')}>
-            AI 대화
-          </button>
-          <button type="button" className="btn ghost sm" onClick={() => openSheet('format')}>
-            서식 점검
-          </button>
-          <button type="button" className="btn ghost sm" onClick={() => openSheet('changes')}>
-            변경 내역 {pending > 0 && <span className="badge">{pending}</span>}
-          </button>
-        </>
+        <button type="button" className="btn ghost sm" onClick={() => openSheet('format')}>
+          서식 점검
+        </button>
       )}
+      <button type="button" className="btn ghost sm" onClick={() => openSheet('changes')}>
+        변경 내역 {pending > 0 && <span className="badge">{pending}</span>}
+      </button>
     </div>
   );
 }

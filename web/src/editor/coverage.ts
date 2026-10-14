@@ -9,13 +9,14 @@ export const COVERAGE_NOTE: Partial<Record<DocKind, string>> = {
   hwp: HWP_NOTE,
   hwpx: HWP_NOTE,
   docx: `본문, 표 안의 글, 머리말·꼬리말, 각주·미주, 글상자를 다뤄요(머리말·꼬리말 안의 글상자와 편집기가 열지 못하는 글상자는 AI가 읽지 못해요). ${AREA_NOTE}`,
+  tex: 'AI에는 고른 범위의 .tex·.bib 원고만 보내요(verbatim·lstlisting·minted 안의 글은 보내지 않아요). 대화로 받는 제안은 본문 글만 고치고, 수식·라벨·참조·인용 키·명령·서문·주석은 바꾸지 않아요(지시에 "수식"이 있으면 수식은 고쳐요). 오류 고치기는 오류 근처와 서문만 고쳐요. 적용한 뒤에는 다시 컴파일해 확인해 주세요.',
 };
 
 /** 서식을 읽고 바꾸는 방식에 대한 안내(한글·Word 문서) */
 export const MIXED_FORMAT_NOTE = '한 문단 안에서 글자마다 서식이 다르면 첫 글자를 기준으로 보고, 서식을 바꿀 때는 문단 전체에 적용해요.';
 
-/** LaTeX 프로젝트의 컴파일 탭 안내: 무엇을 서버로 보내고 언제 지우는지, 무엇을 하지 않는지. AI 제안은 M3 에서 더한다(docs/LATEX.md). */
+/** LaTeX 프로젝트의 컴파일 탭 안내: 무엇을 서버로 보내고 언제 지우는지, 무엇을 하지 않는지(docs/LATEX.md). */
 export function texCompileNote(c: { retentionDays: number; timeoutSec: number; compilesPerDay: number | null; compilesToday: number | null }): string {
   const quota = c.compilesPerDay !== null ? ` · 오늘 ${c.compilesToday ?? 0}/${c.compilesPerDay}회` : '';
-  return `컴파일할 때 프로젝트 파일(원고·그림·참고문헌)을 서버로 보내고, 마지막으로 쓴 날부터 ${c.retentionDays}일 뒤 지워요. 만든 PDF는 한 시간 뒤 지워요. 시간 제한 ${c.timeoutSec}초${quota}. 셸 실행(\\write18)과 latexmkrc 는 쓰지 않아요. LaTeX 원고의 AI 제안은 아직 없어요.`;
+  return `컴파일할 때 프로젝트 파일(원고·그림·참고문헌)을 서버로 보내고, 마지막으로 쓴 날부터 ${c.retentionDays}일 뒤 지워요. 만든 PDF는 한 시간 뒤 지워요. 시간 제한 ${c.timeoutSec}초${quota}. 셸 실행(\\write18)과 latexmkrc 는 쓰지 않아요. "AI로 오류 고치기"는 오류·로그와 오류가 난 파일·주 파일의 원고를 AI에 보내요.`;
 }

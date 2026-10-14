@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { isTexSource, isTextFile, normalizeProjectPath, TEX_ENGINE_LABEL, TEX_ENGINES, type TexEngine as Engine } from '@alldoc/shared';
+import { isTexSource, isTextFile, normalizeProjectPath, slotOf, TEX_ENGINE_LABEL, TEX_ENGINES, type Op, type TexEngine as Engine } from '@alldoc/shared';
 import { loginUrl } from '../ai/client';
 import { useEditor } from '../editor/store';
 import { compileProject } from '../editor/tex/compile';
@@ -12,10 +12,11 @@ import { compileAvailability, useAuth } from '../state/auth';
 import { useSettings } from '../state/settings';
 import { useTerms } from '../state/terms';
 import { toast } from '../state/toast';
-import { unsupported } from './applyOps';
+import { applyAtomic, stale, type OneResult } from './applyOps';
 import PdfView from './pdf/PdfView';
-import { EditorState, EditorView, goToLine, showDiagnostics, texExtensions } from './tex/cm';
-import type { EngineHandle, EngineProps, ExportOption } from './types';
+import { EditorState, EditorView, goToLine, selectedLines, selectRange, showAiMarks, showDiagnostics, texExtensions, type AiMark } from './tex/cm';
+import { applyTexOp, rangeOfTarget, SlotTable, summarizeProject, type ProjectText } from './tex/model';
+import type { EngineHandle, EngineProps, ExportOption, HighlightState, HighlightTarget, SummarizeOptions } from './types';
 
 type Pane = 'files' | 'source' | 'pdf';
 
@@ -62,6 +63,12 @@ export default function TexEngine({ doc, toolsHost, onReady, onDirty, onPages, o
   const compileRef = useRef<() => void>(() => undefined);
   const noticeDialog = useRef<HTMLDialogElement>(null);
   const noticeResolve = useRef<((ok: boolean) => void) | null>(null);
+  /** AI 블록 번호의 파일칸(프로젝트를 열 때 정한다, docs/LATEX.md) */
+  const slots = useRef(new SlotTable());
+  /** 마지막으로 받은 AI 표시(파일을 바꾸면 그 파일 것을 다시 그린다) */
+  const highlights = useRef<HighlightState>({ pending: [], focus: [] });
+  /** 파일을 연 뒤에 보여 줄 AI 제안 자리 */
+  const pendingReveal = useRef<HighlightTarget | null>(null);
 
   filesRef.current = files ?? [];
   projectRef.current = project;
@@ -71,6 +78,8 @@ export default function TexEngine({ doc, toolsHost, onReady, onDirty, onPages, o
   useEffect(() => {
     onPages(null);
     useTex.getState().reset();
+    // LaTeX 프로젝트는 컴파일 탭으로 시작한다.
+    useEditor.getState().setTab('compile');
     let alive = true;
     (async () => {
       try {
@@ -81,6 +90,7 @@ export default function TexEngine({ doc, toolsHost, onReady, onDirty, onPages, o
           onError('LaTeX 프로젝트를 읽지 못했어요.');
           return;
         }
+        slots.current = new SlotTable(records.map((r) => r.path));
         setFiles(records.map((r: TexFileRecord) => ({ path: r.path, blob: r.blob, hash: r.hash })));
         setProject(proj);
         setOpen(records.some((r) => r.path === proj.main) ? proj.main : (records.find((r) => isTextFile(r.path))?.path ?? null));
@@ -121,6 +131,116 @@ export default function TexEngine({ doc, toolsHost, onReady, onDirty, onPages, o
     [markChanged],
   );
 
+  // ---- AI: 요약·적용·표시 ----
+  const mainPath = (): string => projectRef.current?.main ?? '';
+
+  /** 지금 글(편집기에 붙은 파일은 편집기의 글, 연 적 있는 파일은 보관한 상태, 나머지는 저장본) */
+  const textOf = useCallback(async (path: string): Promise<string | null> => {
+    if (attached.current === path && view.current) return view.current.state.doc.toString();
+    const st = states.current.get(path);
+    if (st) return st.doc.toString();
+    const f = filesRef.current.find((x) => x.path === path);
+    return f && isTextFile(path) ? f.blob.text() : null;
+  }, []);
+
+  const isAiFile = (path: string): boolean => /\.(tex|ltx|bib)$/i.test(path);
+
+  const summarize = useCallback(
+    async (opts: SummarizeOptions = {}) => {
+      const cur = attached.current ?? openRef.current;
+      let paths: string[];
+      let onlyLines: { path: string; from: number; to: number } | undefined;
+      // 주 파일은 늘 함께 보낸다(서문을 고칠 수 있게).
+      if (opts.files) paths = [...new Set([mainPath(), ...opts.files])];
+      else if (opts.scope === 'project') paths = filesRef.current.map((f) => f.path);
+      else {
+        paths = cur ? [cur] : [];
+        if (opts.scope === 'selection' && cur && view.current && attached.current === cur) onlyLines = { path: cur, ...selectedLines(view.current.state) };
+      }
+      const texts: ProjectText[] = [];
+      for (const p of paths.filter(isAiFile)) {
+        const text = await textOf(p);
+        if (text !== null) texts.push({ path: p, text });
+      }
+      return summarizeProject(texts, slots.current, mainPath(), onlyLines);
+    },
+    [textOf],
+  );
+
+  /** 지금 편집기에 붙은 파일 위에 AI 표시를 그린다. */
+  const drawMarks = useCallback(() => {
+    const v = view.current;
+    const path = attached.current;
+    if (!v || !path) return;
+    const slot = slots.current.slotFor(path);
+    const f = { path, text: v.state.doc.toString() };
+    const marks: AiMark[] = [];
+    const add = (ts: HighlightTarget[], focus: boolean) => {
+      // 같은 블록의 같은 글을 가리키는 표시는 차례로 다음 자리에 그린다.
+      const seen = new Map<string, number>();
+      for (const t of ts) {
+        if (slotOf(t.paragraph) !== slot) continue;
+        const key = `${t.paragraph}\u0000${t.find ?? ''}`;
+        const nth = seen.get(key) ?? 0;
+        seen.set(key, nth + 1);
+        const r = rangeOfTarget(f, slot, mainPath(), t, nth);
+        if (r) marks.push({ from: r[0], to: r[1], focus });
+      }
+    };
+    add(highlights.current.pending, false);
+    add(highlights.current.focus, true);
+    showAiMarks(v, marks);
+  }, []);
+
+  const revealHere = useCallback((t: HighlightTarget) => {
+    const v = view.current;
+    const path = attached.current;
+    if (!v || !path) return;
+    const slot = slots.current.slotFor(path);
+    const r = rangeOfTarget({ path, text: v.state.doc.toString() }, slot, mainPath(), t) ?? rangeOfTarget({ path, text: v.state.doc.toString() }, slot, mainPath(), { paragraph: t.paragraph });
+    if (r) selectRange(v, r[0], r[1]);
+    else toast('원고가 바뀌어 그 자리를 찾지 못했어요.');
+  }, []);
+
+  const reveal = useCallback(
+    (t: HighlightTarget) => {
+      const path = slots.current.pathOf(slotOf(t.paragraph));
+      if (!path || !filesRef.current.some((f) => f.path === path)) {
+        toast('그 파일이 프로젝트에 없어요.');
+        return;
+      }
+      setPane('source');
+      if (attached.current === path && view.current) {
+        revealHere(t);
+        return;
+      }
+      pendingReveal.current = t;
+      setOpen(path);
+    },
+    [revealHere],
+  );
+
+  /** 변경 하나를 그 파일의 편집 상태에 적용한다(편집기에 붙은 파일이면 편집기에, 아니면 보관한 상태에). */
+  const applyOne = useCallback(
+    async (op: Op): Promise<OneResult> => {
+      const path = slots.current.pathOf(slotOf(op.paragraph));
+      if (!path || !isAiFile(path) || !filesRef.current.some((f) => f.path === path)) return stale('제안을 만든 뒤 파일 이름이 바뀌었거나 파일이 지워졌어요.');
+      const live = attached.current === path && view.current ? view.current : null;
+      const st = live ? live.state : await stateFor(path);
+      if (!st) return stale('파일을 읽지 못했어요.');
+      const r = applyTexOp({ path, text: st.doc.toString() }, slots.current.slotFor(path), mainPath(), op);
+      if (!r.ok) return r;
+      const changes = { from: r.from, to: r.to, insert: r.insert };
+      if (live) live.dispatch({ changes, userEvent: 'input.ai' });
+      else {
+        states.current.set(path, st.update({ changes }).state);
+        markChanged(path);
+      }
+      return { ok: true, inverse: r.inverse };
+    },
+    [stateFor, markChanged],
+  );
+
   // ---- 연 파일을 편집기에 붙이기 ----
   useEffect(() => {
     const path = open;
@@ -133,10 +253,16 @@ export default function TexEngine({ doc, toolsHost, onReady, onDirty, onPages, o
       else view.current.setState(st);
       attached.current = path;
       showDiagnostics(view.current, diagnosticsFor(useTex.getState().result?.diagnostics ?? [], path));
+      drawMarks();
       const j = pendingJump.current;
       if (j && j.file === path) {
         pendingJump.current = null;
         goToLine(view.current, j.line);
+      }
+      const r = pendingReveal.current;
+      if (r && slots.current.pathOf(slotOf(r.paragraph)) === path) {
+        pendingReveal.current = null;
+        revealHere(r);
       }
     })();
     return () => {
@@ -220,6 +346,12 @@ export default function TexEngine({ doc, toolsHost, onReady, onDirty, onPages, o
         { onUpload: (d, t) => useTex.getState().setUpload(d, t), onCompiling: () => useTex.getState().setCompiling() },
       );
       useTex.getState().finish(out.response, out.pdf);
+      useTex.getState().checkRegression(
+        useEditor
+          .getState()
+          .items.filter((i) => i.status === 'applied')
+          .map((i) => i.proposal.id),
+      );
       const cur = attached.current;
       if (view.current && cur) showDiagnostics(view.current, diagnosticsFor(out.response.diagnostics, cur));
       if (out.response.status !== 'ok') useEditor.getState().setTab('compile');
@@ -291,20 +423,33 @@ export default function TexEngine({ doc, toolsHost, onReady, onDirty, onPages, o
         if (pdf) opts.push({ id: 'pdf', label: '마지막으로 만든 PDF', ext: 'pdf', run: async () => new Blob([pdf.slice() as BlobPart], { type: 'application/pdf' }) });
         return opts;
       },
-      summarize: async () => ({ kind: 'tex', paragraphs: [] }),
-      apply: async () => unsupported('LaTeX 프로젝트의 AI 제안은 아직 지원하지 않아요.'),
-      setHighlights: () => undefined,
+      summarize,
+      apply: async (ops) => {
+        const r = await applyAtomic(applyOne, ops);
+        drawMarks();
+        return r;
+      },
+      setHighlights: (state) => {
+        highlights.current = state;
+        drawMarks();
+      },
+      reveal,
     };
     onReady(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, persist]);
+  }, [ready, persist, summarize, applyOne, drawMarks, reveal]);
 
   // ---- 파일 다루기 ----
   const addFiles = async (entries: Array<{ path: string; blob: Blob }>) => {
     try {
       const upsert = await Promise.all(entries.map(async (e) => ({ path: e.path, blob: e.blob, hash: await sha256Hex(e.blob) })));
       await updateTexFiles(doc.id, { upsert });
-      for (const u of upsert) states.current.delete(u.path);
+      for (const u of upsert) {
+        states.current.delete(u.path);
+        // 같은 이름으로 새로 올린 파일은 다른 글이다: 새 파일칸을 받는다.
+        slots.current.forget(u.path);
+        slots.current.slotFor(u.path);
+      }
       setFiles((cur) => {
         const map = new Map((cur ?? []).map((f) => [f.path, f]));
         for (const u of upsert) map.set(u.path, u);
@@ -360,6 +505,9 @@ export default function TexEngine({ doc, toolsHost, onReady, onDirty, onPages, o
       const st = attached.current === from && view.current ? view.current.state : states.current.get(from);
       states.current.delete(from);
       if (st) states.current.set(to, st);
+      // 이름을 바꾸면 새 파일칸을 받는다(옛 이름을 가리키던 제안은 낡은 것이 된다).
+      slots.current.forget(from);
+      slots.current.slotFor(to);
       if (attached.current === from) attached.current = to;
       for (const m of [versions.current, saved.current]) {
         const v = m.get(from);
@@ -386,6 +534,7 @@ export default function TexEngine({ doc, toolsHost, onReady, onDirty, onPages, o
       await updateTexFiles(doc.id, { remove: [path] });
       if (attached.current === path) attached.current = null;
       states.current.delete(path);
+      slots.current.forget(path);
       versions.current.delete(path);
       saved.current.delete(path);
       setFiles((cur) => (cur ?? []).filter((f) => f.path !== path));

@@ -49,7 +49,7 @@ test.describe('LaTeX 프로젝트(데모 컴파일러)', () => {
     await expectPdfDrawn(page);
     // 컴파일 탭의 안내(web/src/editor/coverage.ts 의 texCompileNote)
     await expect(page.getByTestId('coverage-note')).toContainText('마지막으로 쓴 날부터 7일 뒤 지워요');
-    await expect(page.getByTestId('coverage-note')).toContainText('LaTeX 원고의 AI 제안은 아직 없어요');
+    await expect(page.getByTestId('coverage-note')).toContainText('AI로 오류 고치기"는 오류·로그와');
 
     // 하위 파일(chapters/intro.tex)의 첫 줄(\chapter, 줄바꿈 없이 한 줄로 보이는 짧은 줄) 뒤에 오류를 넣고 Ctrl+S 로 다시 컴파일한다.
     await openInTree(page, 'chapters/intro.tex');
@@ -97,7 +97,7 @@ test.describe('LaTeX 프로젝트(데모 컴파일러)', () => {
     const zip = await downloadAs(page, /프로젝트 ZIP/);
     expect(zip.name).toBe('한국어 보고서_수정본.zip');
     const names = Object.keys((await import('fflate')).unzipSync(new Uint8Array(zip.bytes))).sort();
-    expect(names).toEqual(['chapters/intro.tex', 'chapters/method.tex', 'main.tex', 'refs.bib']);
+    expect(names).toEqual(['LICENSE', 'chapters/intro.tex', 'chapters/method.tex', 'main.tex', 'refs.bib']);
   });
 
   test('ZIP 을 올리면 latexmkrc 와 밖을 가리키는 경로는 빼고 알린다. 파일을 더하고 이름을 바꾸고 지울 수 있다', async ({ page }) => {

@@ -19,6 +19,12 @@ interface TexState {
   jump: { file: string; line: number; seq: number } | null;
   /** 편집기가 등록하는 "지금 컴파일" 함수(컴파일 탭의 단추가 부른다) */
   compile: (() => void) | null;
+  /** "AI로 오류 고치기"를 부를 때의 오류 수. 그 뒤 컴파일에서 오류가 늘었는지 본다(docs/LATEX.md 느슨한 모드). */
+  fixBaseline: number | null;
+  /** 그때 올라온 오류 고치기 제안 */
+  fixIds: string[];
+  /** AI 제안을 적용한 뒤 오류가 늘었을 때의 안내 */
+  regression: { before: number; after: number } | null;
 
   reset: () => void;
   start: () => void;
@@ -28,22 +34,50 @@ interface TexState {
   fail: (message: string) => void;
   jumpTo: (file: string, line: number) => void;
   setCompile: (fn: (() => void) | null) => void;
+  setFixBaseline: (n: number | null, ids?: string[]) => void;
+  /** 컴파일이 끝난 뒤 부른다. 적용한 제안(appliedIds) 중에 오류 고치기 제안이 있으면 오류 수를 비교한다. */
+  checkRegression: (appliedIds: string[]) => void;
 }
 
 let seq = 0;
-const initial = { phase: 'idle' as CompilePhase, startedAt: null, upload: null, result: null, error: null, pdf: null, jump: null, compile: null };
+const initial = {
+  phase: 'idle' as CompilePhase,
+  startedAt: null,
+  upload: null,
+  result: null,
+  error: null,
+  pdf: null,
+  jump: null,
+  compile: null,
+  fixBaseline: null as number | null,
+  fixIds: [] as string[],
+  regression: null as { before: number; after: number } | null,
+};
 
-export const useTex = create<TexState>((set) => ({
+export const useTex = create<TexState>((set, get) => ({
   ...initial,
   reset: () => set({ ...initial }),
-  start: () => set({ phase: 'uploading', startedAt: Date.now(), upload: null, error: null }),
+  start: () => set({ phase: 'uploading', startedAt: Date.now(), upload: null, error: null, regression: null }),
   setUpload: (done, total) => set({ upload: { done, total } }),
   setCompiling: () => set({ phase: 'compiling', upload: null }),
   finish: (result, pdf) => set((s) => ({ phase: 'done', result, pdf: pdf ?? s.pdf, startedAt: null, upload: null })),
   fail: (error) => set({ phase: 'failed', error, startedAt: null, upload: null }),
   jumpTo: (file, line) => set({ jump: { file, line, seq: ++seq } }),
   setCompile: (compile) => set({ compile }),
+  setFixBaseline: (fixBaseline, ids = []) => set({ fixBaseline, fixIds: ids }),
+  checkRegression: (appliedIds) => {
+    const { fixBaseline, fixIds, result } = get();
+    if (fixBaseline === null || !result || !fixIds.some((id) => appliedIds.includes(id))) return;
+    const after = errorCount(result);
+    set({ fixBaseline: null, fixIds: [], regression: after > fixBaseline ? { before: fixBaseline, after } : null });
+  },
 }));
+
+/** 오류 수. 진단이 없어도 PDF를 못 만들었으면 1로 센다. */
+export function errorCount(r: CompileResponse): number {
+  const n = countBySeverity(r.diagnostics).error;
+  return r.status === 'ok' ? n : Math.max(n, 1);
+}
 
 export const isBusy = (p: CompilePhase): boolean => p === 'uploading' || p === 'compiling';
 
