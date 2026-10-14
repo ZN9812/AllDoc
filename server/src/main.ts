@@ -4,6 +4,7 @@ import { createApp } from './app';
 import { createProviders } from './ai/providers';
 import { ConfigError, loadConfig } from './config';
 import { loadDotEnv } from './dotenv';
+import { LedgerStore } from './ledger';
 import { dayKey, QuotaStore } from './quota';
 
 // 설정을 읽기 전에 .env 를 환경 변수로 읽는다(개발·시험용. 운영에서는 읽지 않는다).
@@ -23,8 +24,10 @@ try {
 }
 
 const quota = new QuotaStore(join(config.dataDir, 'alldoc.sqlite'));
+// AI 사용량 원장. 같은 파일의 다른 테이블이며, 원가 집계에 쓰므로 지우지 않는다(보고: server/dist/ledger-report.js).
+const ledger = new LedgerStore(join(config.dataDir, 'alldoc.sqlite'));
 const providers = createProviders(config);
-const app = createApp({ config, quota, providers });
+const app = createApp({ config, quota, providers, ledger });
 
 // 지난 사용 기록은 2주 뒤에 지운다(하루 한도 계산에는 오늘 기록만 필요하다).
 const prune = () => {
@@ -49,6 +52,7 @@ function shutdown(signal: string): void {
   console.log(`${signal} 신호를 받아 종료합니다.`);
   server.close(() => {
     quota.close();
+    ledger.close();
     process.exit(0);
   });
   setTimeout(() => process.exit(0), 10_000).unref();

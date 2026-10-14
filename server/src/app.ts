@@ -5,7 +5,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { AiRequestSchema, ERROR_CODES, isAiTarget, MAX_DOC_CHARS, type AiResponse, type MeResponse } from '@alldoc/shared';
 import { toProposals } from './ai/convert';
 import type { Providers } from './ai/providers';
-import { ProviderFailedError, ProviderRefusedError } from './ai/types';
+import { ProviderFailedError, ProviderRefusedError, type ProviderUsage } from './ai/types';
 import { buildAuthUrl, loginWithCode } from './auth/google';
 import {
   newSessionToken,
@@ -22,6 +22,7 @@ import {
   type SessionUser,
 } from './auth/session';
 import type { Config } from './config';
+import type { AiOutcome, LedgerStore } from './ledger';
 import { dayKey, quotaOf, type QuotaStore } from './quota';
 import { createStaticHandler } from './static';
 
@@ -29,6 +30,8 @@ export interface AppDeps {
   config: Config;
   quota: QuotaStore;
   providers: Providers;
+  /** AI 사용량 원장. 없으면 남기지 않는다(시험 등). */
+  ledger?: LedgerStore;
   now?: () => Date;
   fetch?: typeof fetch;
   log?: (message: string, extra?: Record<string, unknown>) => void;
@@ -212,13 +215,37 @@ export function createApp(deps: AppDeps): Hono {
       }
 
       const started = Date.now();
+      /** 원장에 한 줄 남긴다. 원장 기록이 실패해도 사용자 응답은 막지 않는다. 원가(마이크로달러)를 돌려준다. */
+      const record = (outcome: AiOutcome, usage: ProviderUsage | undefined, proposals = 0, dropped = 0): number | null => {
+        if (!deps.ledger) return null;
+        try {
+          return deps.ledger.recordAi({
+            at: now().getTime(),
+            day,
+            userId: user?.id ?? null,
+            task: req.mode,
+            provider: provider.id,
+            modelRequested: usage?.modelRequested ?? (provider.demo ? 'mock' : config.ai[req.mode].model),
+            usage,
+            docChars: chars,
+            proposals,
+            dropped,
+            ms: Date.now() - started,
+            outcome,
+          });
+        } catch (err) {
+          log('AI 원장 기록 실패', { error: err instanceof Error ? `${err.name}: ${err.message}`.slice(0, 500) : String(err).slice(0, 500) });
+          return null;
+        }
+      };
+      const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(AI_TIMEOUT_MS)]);
       try {
-        const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(AI_TIMEOUT_MS)]);
         const result = await provider.propose({ request: req, signal });
         const { proposals, dropped } = toProposals(result.proposals, req.document);
         let reply = result.reply.trim() || (proposals.length > 0 ? `제안 ${proposals.length}개를 만들었어요.` : '고칠 곳을 찾지 못했어요.');
         if (dropped > 0) reply += `\n(문서와 맞지 않는 제안 ${dropped}개는 제외했어요.)`;
-        log('AI 요청 완료', { mode: req.mode, provider: provider.id, chars, proposals: proposals.length, dropped, ms: Date.now() - started });
+        const cost = record('ok', result.usage, proposals.length, dropped);
+        log('AI 요청 완료', { mode: req.mode, provider: provider.id, model: result.usage?.modelServed, chars, proposals: proposals.length, dropped, costMicroUsd: cost, ms: Date.now() - started });
         const out: AiResponse = {
           reply,
           proposals,
@@ -228,11 +255,13 @@ export function createApp(deps: AppDeps): Hono {
         return c.json(out);
       } catch (e) {
         if (e instanceof ProviderRefusedError) {
-          // 모델이 답을 거절했다: 요청은 처리되었으므로 사용 횟수는 돌려주지 않는다.
-          log('AI 거절', { mode: req.mode, provider: provider.id });
+          // 모델이 답을 거절했다: 요청은 처리되었으므로 사용 횟수는 돌려주지 않는다. 거절도 과금될 수 있어 원장에 남긴다.
+          const cost = record('refused', e.usage);
+          log('AI 거절', { mode: req.mode, provider: provider.id, costMicroUsd: cost });
           return fail(c, 422, ERROR_CODES.aiRefused, e.message);
         }
         if (user) quota.refund(user.id, day);
+        record(signal.aborted ? 'aborted' : 'failed', e instanceof ProviderFailedError ? e.usage : undefined);
         const cause = e instanceof ProviderFailedError ? e.cause : e;
         log('AI 요청 실패', { mode: req.mode, provider: provider.id, ms: Date.now() - started, error: cause instanceof Error ? `${cause.name}: ${cause.message}`.slice(0, 500) : String(cause).slice(0, 500) });
         if (c.req.raw.signal.aborted) return fail(c, 400, ERROR_CODES.badRequest, '요청이 취소되었어요.');

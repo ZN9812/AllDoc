@@ -3,7 +3,7 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import type { AiTaskSettings } from '../config';
 import { buildMessages } from './prompt';
 import { AiOutputSchema, type AiOutput } from './schema';
-import { ProviderFailedError, ProviderRefusedError, type AiProvider, type ProposeInput, type ProviderResult } from './types';
+import { ProviderFailedError, ProviderRefusedError, type AiProvider, type ProposeInput, type ProviderResult, type ProviderUsage, type UsagePart } from './types';
 
 /** 모델이 정책상 거절하면 서버 쪽에서 대체 모델로 다시 시도하게 하는 Anthropic 베타 기능 */
 export const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
@@ -18,6 +18,48 @@ interface ParsedMessage {
   stop_reason: string | null;
   parsed_output: AiOutput | null;
   content?: unknown;
+  model?: string;
+  usage?: RawUsage;
+}
+
+/** 응답의 usage 중 원가 계산에 쓰는 칸만. 대체 모델이 답하면 맨 위 값은 마지막 시도만 담으므로 iterations 를 쓴다. */
+interface RawUsageEntry {
+  type?: string;
+  model?: string | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  cache_creation?: { ephemeral_1h_input_tokens?: number | null } | null;
+}
+interface RawUsage extends RawUsageEntry {
+  iterations?: RawUsageEntry[] | null;
+}
+
+/**
+ * 응답에서 사용량을 뽑는다. iterations 에 시도별 값(message·fallback_message)이 있으면 그것을 모두 더하고,
+ * 없으면 맨 위 값을 쓴다. 응답에 usage 가 없으면 undefined.
+ */
+export function usageOf(message: Pick<ParsedMessage, 'model' | 'usage'>, modelRequested: string): ProviderUsage | undefined {
+  const u = message.usage;
+  if (!u) return undefined;
+  const modelServed = message.model ?? modelRequested;
+  const tries = (u.iterations ?? []).filter((e) => e.type === 'message' || e.type === 'fallback_message');
+  const n = (v: number | null | undefined) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
+  const part = (e: RawUsageEntry): UsagePart => ({
+    model: e.model ?? modelServed,
+    inputTokens: n(e.input_tokens),
+    outputTokens: n(e.output_tokens),
+    cacheWriteTokens: n(e.cache_creation_input_tokens),
+    cacheWrite1hTokens: n(e.cache_creation?.ephemeral_1h_input_tokens),
+    cacheReadTokens: n(e.cache_read_input_tokens),
+  });
+  return {
+    modelRequested,
+    modelServed,
+    fallback: tries.some((e) => e.type === 'fallback_message'),
+    parts: tries.length > 0 ? tries.map(part) : [part({ ...u, model: modelServed })],
+  };
 }
 
 export function describeError(e: unknown): string {
@@ -78,13 +120,14 @@ export class AnthropicProvider implements AiProvider {
       throw mapAnthropicError(e);
     }
 
-    if (message.stop_reason === 'refusal') throw new ProviderRefusedError();
+    const usage = usageOf(message, this.settings.model);
+    if (message.stop_reason === 'refusal') throw new ProviderRefusedError(undefined, usage);
     if (message.stop_reason === 'max_tokens') {
-      throw new ProviderFailedError('AI 응답이 너무 길어 중간에 끊겼어요. 문서를 나누어 다시 시도해 주세요.');
+      throw new ProviderFailedError('AI 응답이 너무 길어 중간에 끊겼어요. 문서를 나누어 다시 시도해 주세요.', undefined, usage);
     }
     const out = message.parsed_output;
-    if (!out) throw new ProviderFailedError('AI 응답을 이해하지 못했어요. 다시 시도해 주세요.');
-    return { reply: out.reply, proposals: out.proposals };
+    if (!out) throw new ProviderFailedError('AI 응답을 이해하지 못했어요. 다시 시도해 주세요.', undefined, usage);
+    return { reply: out.reply, proposals: out.proposals, usage };
   }
 
   /**

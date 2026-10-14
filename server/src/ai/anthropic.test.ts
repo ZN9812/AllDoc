@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { AiRequest } from '@alldoc/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { testConfig } from '../test-support/helpers';
-import { AnthropicProvider, FALLBACK_BETA, mapAnthropicError, type AnthropicLike } from './anthropic';
+import { AnthropicProvider, FALLBACK_BETA, mapAnthropicError, usageOf, type AnthropicLike } from './anthropic';
 import { ProviderFailedError, ProviderRefusedError } from './types';
 
 const request: AiRequest = {
@@ -101,6 +101,61 @@ describe('Claude 연결부', () => {
     const ac = new AbortController();
     await new AnthropicProvider(settings(), client).propose({ request, signal: ac.signal });
     expect(beta.mock.calls[0]?.[1]).toEqual({ signal: ac.signal });
+  });
+});
+
+describe('Claude 응답의 사용량', () => {
+  const top = { input_tokens: 1_200, output_tokens: 300, cache_creation_input_tokens: 50, cache_read_input_tokens: 700, cache_creation: { ephemeral_1h_input_tokens: 10 } };
+
+  it('대체 모델 없이 답하면 맨 위 usage 를 쓰고 답한 모델을 기록한다', async () => {
+    const { client } = fakeClient({ beta: vi.fn().mockResolvedValue({ ...ok, model: 'claude-opus-5-5', usage: { ...top, iterations: null } }) });
+    const r = await new AnthropicProvider(settings(), client).propose({ request });
+    expect(r.usage).toEqual({
+      modelRequested: 'claude-opus-5-5',
+      modelServed: 'claude-opus-5-5',
+      fallback: false,
+      parts: [{ model: 'claude-opus-5-5', inputTokens: 1_200, outputTokens: 300, cacheWriteTokens: 50, cacheWrite1hTokens: 10, cacheReadTokens: 700 }],
+    });
+  });
+
+  it('대체 모델이 답하면 맨 위 값이 아니라 시도별 값(iterations)을 모두 남긴다', () => {
+    const u = usageOf(
+      {
+        model: 'claude-opus-4-8',
+        usage: {
+          input_tokens: 900, // 마지막 시도만 담긴 값: 쓰지 않는다
+          output_tokens: 80,
+          iterations: [
+            { type: 'message', model: 'claude-opus-5-5', input_tokens: 1_000, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+            { type: 'fallback_message', model: 'claude-opus-4-8', input_tokens: 900, output_tokens: 80, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+            { type: 'compaction', input_tokens: 9_999, output_tokens: 9_999 },
+          ],
+        },
+      },
+      'claude-opus-5-5',
+    );
+    expect(u?.fallback).toBe(true);
+    expect(u?.modelServed).toBe('claude-opus-4-8');
+    expect(u?.parts.map((p) => [p.model, p.inputTokens, p.outputTokens])).toEqual([
+      ['claude-opus-5-5', 1_000, 5],
+      ['claude-opus-4-8', 900, 80],
+    ]);
+  });
+
+  it('응답에 usage 가 없으면 비워 둔다', () => {
+    expect(usageOf({}, 'claude-opus-5-5')).toBeUndefined();
+  });
+
+  it('거절·끊김·형식 오류도 과금될 수 있어 사용량을 오류에 담는다', async () => {
+    const withUsage = (m: object) => fakeClient({ beta: vi.fn().mockResolvedValue({ ...m, model: 'claude-opus-5-5', usage: top }) });
+    const refused = await new AnthropicProvider(settings(), withUsage({ stop_reason: 'refusal', parsed_output: null }).client).propose({ request }).catch((e) => e);
+    expect(refused).toBeInstanceOf(ProviderRefusedError);
+    expect(refused.usage?.parts[0]?.inputTokens).toBe(1_200);
+    const cut = await new AnthropicProvider(settings(), withUsage({ stop_reason: 'max_tokens', parsed_output: null }).client).propose({ request }).catch((e) => e);
+    expect(cut).toBeInstanceOf(ProviderFailedError);
+    expect(cut.usage?.parts[0]?.outputTokens).toBe(300);
+    const bad = await new AnthropicProvider(settings(), withUsage({ stop_reason: 'end_turn', parsed_output: null }).client).propose({ request }).catch((e) => e);
+    expect(bad.usage?.modelServed).toBe('claude-opus-5-5');
   });
 });
 

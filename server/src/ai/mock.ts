@@ -111,6 +111,11 @@ export class MockProvider implements AiProvider {
   readonly demo = true;
 
   async propose({ request }: ProposeInput): Promise<ProviderResult> {
+    // 원장에는 모델 mock, 토큰 0 으로 남는다(실제 AI 비용이 없음).
+    return { ...this.answer(request), usage: { modelRequested: 'mock', modelServed: 'mock', fallback: false, parts: [] } };
+  }
+
+  private answer(request: ProposeInput['request']): Omit<ProviderResult, 'usage'> {
     const doc = request.document;
 
     if (request.mode === 'format_check') {

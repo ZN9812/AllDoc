@@ -60,7 +60,7 @@ LaTeX(논문) 편집 설계는 `docs/LATEX.md` 에 따로 있습니다. 구현�
 
 | # | 내용 | 완료 기준(확인한 것만) |
 | --- | --- | --- |
-| M0 측정·결정 | ① AI 사용량 원장(아래 "계측") ② 시스템 프롬프트 캐싱 ③ 진짜 Claude 호출 확인 ④ SuperDoc 문의(`legal@superdoc.dev`) ⑤ 이름·도메인 후보(상표 검색) ⑥ 병행: LaTeX 실험 E1·E3(`docs/LATEX.md`) | 원장에 토큰·원가가 쌓임. 같은 요청을 반복하면 `cache_read_input_tokens > 0`. 기능별 원가를 `docs/AI.md` 에 기록. E1 시간·이미지 크기 기록 |
+| M0 측정·결정 | ① AI 사용량 원장(아래 "계측". **구현함**, 진짜 호출로 쌓인 값은 아직 없음) ② 시스템 프롬프트 캐싱 ③ 진짜 Claude 호출 확인 ④ SuperDoc 문의(`legal@superdoc.dev`) ⑤ 이름·도메인 후보(상표 검색) ⑥ 병행: LaTeX 실험 E1·E3(`docs/LATEX.md`) | 원장에 토큰·원가가 쌓임. 같은 요청을 반복하면 `cache_read_input_tokens > 0`. 기능별 원가를 `docs/AI.md` 에 기록. E1 시간·이미지 크기 기록 |
 | M1 계정·요금제(결제 없음) | 사용자 테이블, 세션 무효화, DB 마이그레이션, 요금제·권한 모듈, 탈퇴·파기, 관리자 CLI(수동 요금제 부여), 약관 동의, 백업, 전체 비용 차단기 | 탈퇴 후 옛 쿠키가 401(시험). 수동 부여로 한도가 오름(시험). 기존 종단 시험 통과(`DAILY_AI_LIMIT` 동작 유지). 복구 훈련 기록 |
 | M2 LaTeX MVP(AI 없음) | `docs/LATEX.md` | 그 문서의 M2 기준 |
 | M3 LaTeX AI | `docs/LATEX.md` | 그 문서의 M3 기준 |
@@ -78,6 +78,8 @@ LaTeX(논문) 편집 설계는 `docs/LATEX.md` 에 따로 있습니다. 구현�
 ## 설계
 
 ### 계측 (M0, 가장 먼저)
+
+> **구현 상태(2026-10)**: 원장·단가표·보고 명령을 넣었습니다(`server/src/ledger.ts`, `server/src/ai/pricing.ts`, `server/src/ledger-report.ts`, 사용법은 `docs/AI.md`). 응답 `id` 는 남기지 않습니다. 가짜 클라이언트로만 시험했으므로, `usage.iterations` 의 모양과 모델 이름은 진짜 호출로 확인해야 합니다. 프롬프트 캐싱(②)과 진짜 호출 확인(③)은 아직입니다.
 
 - **응답에서 기록할 것**: `server/src/ai/anthropic.ts` 의 응답 형식(`ParsedMessage`)에 `id`·`model`·`usage` 를 추가하고, `ProviderResult`(`server/src/ai/types.ts`)로 넘깁니다.
   - 필드: `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`

@@ -1,9 +1,9 @@
-// 서버를 dist/main.js 하나로 묶는다. node: 내장 모듈(node:sqlite 등)은 그대로 둔다.
+// 서버를 dist/main.js 하나로, 원장 보고 명령을 dist/ledger-report.js 로 묶는다. node: 내장 모듈(node:sqlite 등)은 그대로 둔다.
 import { build } from 'esbuild';
 
 await build({
-  entryPoints: ['src/main.ts'],
-  outfile: 'dist/main.js',
+  entryPoints: ['src/main.ts', 'src/ledger-report.ts'],
+  outdir: 'dist',
   bundle: true,
   platform: 'node',
   format: 'esm',

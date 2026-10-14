@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp, type AppDeps } from './app';
 import { MockProvider } from './ai/mock';
 import { ProviderFailedError, ProviderRefusedError, type AiProvider, type ProviderResult } from './ai/types';
+import { LedgerStore } from './ledger';
 import { QuotaStore } from './quota';
 import { testConfig } from './test-support/helpers';
 
@@ -397,5 +398,39 @@ describe('웹 앱 제공', () => {
 
   it('상태 확인 주소', async () => {
     expect(await (await app.request('/api/health')).json()).toEqual({ ok: true });
+  });
+});
+
+describe('AI 사용량 원장 기록', () => {
+  const usage = { modelRequested: 'claude-opus-5-5', modelServed: 'claude-opus-5-5', fallback: false, parts: [{ model: 'claude-opus-5-5', inputTokens: 1_000, outputTokens: 100, cacheWriteTokens: 0, cacheWrite1hTokens: 0, cacheReadTokens: 0 }] };
+  const rows = (ledger: LedgerStore) => ledger.summary('2026-10-01', '2026-10-01');
+
+  it('성공한 요청은 결과와 원가를 남긴다(데모 AI 는 모델 mock, 원가 0)', async () => {
+    const ledger = new LedgerStore(':memory:');
+    const { app } = setup({}, { ledger });
+    expect((await post(app, chatBody(), await login(app))).status).toBe(200);
+    expect(rows(ledger)).toMatchObject([{ task: 'chat', model: 'mock', requests: 1, ok: 1, noUsage: 0, totalMicroUsd: 0 }]);
+  });
+
+  it('거절과 응답 뒤 실패도 사용량과 함께 남기고, 연결 실패는 원가를 비워 둔다', async () => {
+    const ledger = new LedgerStore(':memory:');
+    const refusing: AiProvider = { id: 'anthropic', demo: false, propose: async () => { throw new ProviderRefusedError(undefined, usage); } };
+    const cut: AiProvider = { id: 'anthropic', demo: false, propose: async () => { throw new ProviderFailedError('끊겼어요', undefined, usage); } };
+    const down: AiProvider = { id: 'anthropic', demo: false, propose: async () => { throw new ProviderFailedError('연결하지 못했어요'); } };
+    for (const p of [refusing, cut, down]) {
+      const { app } = setup({}, { ledger, providers: { chat: p, format_check: p } });
+      await post(app, chatBody(), await login(app));
+    }
+    // 4,000 + 2,000 마이크로달러씩 두 건
+    expect(rows(ledger)).toMatchObject([{ model: 'claude-opus-5-5', requests: 3, ok: 0, noUsage: 1, totalMicroUsd: 12_000 }]);
+  });
+
+  it('원장 기록이 실패해도 사용자 응답은 그대로 간다', async () => {
+    const ledger = new LedgerStore(':memory:');
+    ledger.close(); // 닫힌 DB 에 쓰면 오류가 난다
+    const log = vi.fn();
+    const { app } = setup({}, { ledger, log });
+    expect((await post(app, chatBody(), await login(app))).status).toBe(200);
+    expect(log.mock.calls.some(([m]) => m === 'AI 원장 기록 실패')).toBe(true);
   });
 });
