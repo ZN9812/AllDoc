@@ -44,7 +44,6 @@ Overleaf 처럼 LaTeX 프로젝트를 편집하고, 서버에서 컴파일한 PD
 
 **사용자가 정할 것**
 - 컴파일 한도의 실제 값(지금은 임시: 60초, 횟수·시간 제한 없음, 50MB)과 무료 사용자에게 컴파일을 줄지, 보관 날 수(지금 7일).
-- 템플릿 라이선스(CC0 또는 MIT).
 - 일꾼 이미지의 TeX Live 출처(Debian 패키지 유지 또는 `install-tl` 연도 스냅숏).
 
 ## 완료 기준 (G3)
@@ -291,7 +290,7 @@ Overleaf 처럼 LaTeX 프로젝트를 편집하고, 서버에서 컴파일한 PD
 - **목록**: 직접 만든 것만 넣습니다(`templates/latex/{ko-article,ko-report,en-article,ko-beamer}/`). 빌드할 때 `web/public/templates/*.zip` 으로 묶습니다.
   - 한국어: XeLaTeX + kotex, 글꼴 명시
   - report: 장·목차·biblatex(biber)
-- **라이선스**: CC0 또는 MIT(사용자 결정, **아직 정하지 않음**). 사용자의 논문이 AGPL 문제에 얽히지 않게 합니다.
+- **라이선스**: **MIT**(2026-10 사용자 결정, `templates/latex/LICENSE`, ZIP 마다 포함). 사용자의 논문이 AGPL 문제에 얽히지 않게 합니다.
 - **학교 학위논문 양식·로고는 넣지 않습니다**(라이선스·상표). 사용자가 직접 올려 쓸 수 있고, TeX Live 에 들어 있는 클래스는 그대로 됩니다.
 
 ## 실험 (구현 전에 먼저, CLAUDE.md 의 "코어를 직접 불러 실험" 원칙)

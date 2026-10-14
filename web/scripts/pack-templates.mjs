@@ -30,6 +30,8 @@ for (const id of readdirSync(src).sort()) {
     // 만든 시각을 고정해 같은 내용이면 같은 ZIP 이 나오게 한다.
     files[rel] = [new Uint8Array(readFileSync(f)), { mtime: new Date('2026-01-01T00:00:00Z') }];
   }
+  // 템플릿 라이선스(MIT)를 ZIP 마다 함께 넣는다.
+  files.LICENSE = [new Uint8Array(readFileSync(join(src, 'LICENSE'))), { mtime: new Date('2026-01-01T00:00:00Z') }];
   writeFileSync(join(out, `${id}.zip`), zipSync(files, { level: 9 }));
   index.push({ id, title: meta.title, description: meta.description, name: meta.name });
 }
