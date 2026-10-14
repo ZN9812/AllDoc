@@ -127,15 +127,19 @@ Overleaf 처럼 LaTeX 프로젝트를 편집하고, 서버에서 컴파일한 PD
 
   ```
   bwrap --unshare-all --die-with-parent --new-session --clearenv \
-    --ro-bind /usr /usr --ro-bind <texlive> <texlive> --ro-bind /etc/fonts /etc/fonts \
-    --bind /work/<job> /w --tmpfs /tmp --proc /proc --dev /dev --chdir /w \
-    --setenv TEXMFVAR /tmp/texmf-var --setenv max_print_line 10000 \
+    --ro-bind /usr /usr --symlink usr/lib /lib --symlink usr/lib64 /lib64 --symlink usr/bin /bin \
+    --ro-bind <texlive> <texlive> --ro-bind /etc/fonts /etc/fonts \
+    --bind /work/<job> /w --tmpfs /tmp --dev /dev --chdir /w \
+    --setenv PATH /usr/bin --setenv HOME /tmp --setenv TEXMFVAR /tmp/texmf-var --setenv max_print_line 10000 \
+    --setenv shell_escape f --setenv openin_any p --setenv openout_any p \
     prlimit --as=<mem> --cpu=<sec> --fsize=<max> --nproc=64 -- \
     latexmk -norc -r /etc/safe-latexmkrc -<engine> -interaction=nonstopmode -file-line-error -synctex=1 <main>
   ```
 
   - 시간 제한: Node 일꾼이 벽시계 시간을 재고, 넘으면 프로세스 묶음을 강제 종료합니다.
-  - bubblewrap 이 컨테이너 안에서 사용자 이름공간을 만들 수 있는지는 확인하지 못했습니다(E3). 안 되면 nsjail(Apache-2.0)을 쓰거나 작업마다 컨테이너를 띄우는 별도 실행기를 둡니다.
+  - `--proc /proc` 는 넣지 않습니다. 컨테이너 안에서 붙이려면 Docker 의 `systempaths=unconfined` 가 필요한데, TeX 는 `/proc` 없이 컴파일됩니다(E3).
+  - **Docker 기본 seccomp 로는 bubblewrap 이 사용자 이름공간을 만들지 못합니다**(E3). 컨테이너에는 기본 프로필에 `unshare` `setns` `mount` `umount2` `pivot_root` `clone` `clone3` 만 더한 seccomp 프로필을 줍니다. 운영 서버의 커널(AppArmor)이 권한 없는 사용자 이름공간을 막으면 nsjail(Apache-2.0)을 쓰거나 작업마다 컨테이너를 띄우는 별도 실행기를 둡니다.
+  - TeX 설정(아래)은 `texmf.cnf` 를 고치지 않고 환경변수로도 줄 수 있어 위 명령에 넣었습니다(E3 에서 `shell_escape`·`openin_any`·`openout_any` 가 적용되는 것을 확인).
 - **TeX 설정**: `shell_escape = f`, `openin_any = p`, `openout_any = p` 로 둡니다.
   - `latexmk -norc` 로 프로젝트의 `latexmkrc`(셸 실행을 다시 켤 수 있는 펄 코드)를 실행하지 않습니다.
   - 알려진 한계: EPS→PDF 자동 변환(제한된 셸 실행)은 꺼집니다.
@@ -260,6 +264,46 @@ Overleaf 처럼 LaTeX 프로젝트를 편집하고, 서버에서 컴파일한 PD
 | E2 탈출 시험 묶음(`compiler/test/escape/`) | 아래 목록이 모두 막히거나 제한되는지 | CI 에 고정 |
 | E3 격리 방식 | bubblewrap 이 컨테이너 안(runc, 필요하면 seccomp 설정 / runsc)에서 동작하는지 | 안쪽층 도구(bubblewrap·nsjail·작업별 컨테이너) |
 
+### 실험 결과 (2026-10-14, 이 환경에서 한 번 해 본 것이며 CI 에서는 돌지 않는다)
+
+이 환경은 4코어·메모리 15GB 의 가상 머신(Ubuntu 24.04, 커널 6.18)이다. TeX Live 는 계획한 연도 스냅숏(`install-tl`)이 아니라 **Ubuntu 패키지의 TeX Live 2023**(`texlive-xetex`·`texlive-luatex`·`texlive-lang-korean`·`texlive-latex-extra` 등, `fonts-noto-cjk`·`fonts-nanum`)으로 했다. 그래서 아래 값은 방향을 정하는 참고값이고, 실제 이미지로 다시 잰다.
+
+**E1 — 한국어 컴파일**(표본: 절 3개, 수식·표·문장 부호가 든 한 쪽 문서와, 그것을 40번 이어 붙인 23쪽 문서. `latexmk -norc`, 깨끗한 폴더에서 처음부터)
+
+| 엔진 · 글꼴 | 1쪽 처음 | 1쪽 반복 | 23쪽 | PDF 크기(1쪽 / 23쪽) | 글꼴 포함 | 한글 대조 |
+| --- | --- | --- | --- | --- | --- | --- |
+| pdfLaTeX + kotex(기본 Type1 한글 글꼴) | 1.70초 | 1.30초 | 1.66초 | 1,608,139 / 1,650,588 바이트 | 47개 모두 포함 | 4/4 |
+| XeLaTeX + kotex, Noto Serif/Sans CJK KR | 2.10초 | 2.14초 | 2.27초(다시 세 번 2.55·2.79·2.93초) | 44,474 / 79,067 | 12개 모두 포함 | 4/4 |
+| XeLaTeX + kotex, 나눔명조·나눔고딕 | 2.01초 | 2.23초 | 2.54초 | 52,998 / 87,397 | 12개 모두 포함 | 4/4 |
+| LuaLaTeX + luatexko, Noto | **75.23초** | 9.93초 | 9.76초 | 96,422 / 135,761 | 12개 모두 포함 | 4/4 |
+
+- "글꼴 포함"은 `pdffonts` 의 emb 칸, "한글 대조"는 `pdftotext` 결과에 표본의 한글 구절 4개가 그대로 들어 있는지 센 것이다.
+- **LuaLaTeX 첫 실행 75초는 글꼴 캐시를 만드는 시간**이다. 설계대로 이미지를 만들 때 `luaotfload-tool -u` 로 미리 만들어야 한다. 캐시가 있어도 XeLaTeX 보다 약 4배 느렸다.
+- pdfLaTeX + kotex 는 한 쪽짜리도 PDF 가 1.6MB 였다(한글 Type1 글꼴 조각 47개). 빠르지만 결과물이 크다.
+- XeLaTeX + kotex 한 쪽을 그림으로 그려 눈으로 봤다: 한글·수식·표가 바르게 나왔다. 다른 조합은 그림으로 보지 않았다.
+- `article` 의 표 제목이 "Table 1" 로 나온다. 한국어 템플릿에서 제목 이름을 한국어로 정해야 한다.
+- **정한 것(제안)**: 기본 엔진은 설계대로 XeLaTeX + kotex(Noto). LuaLaTeX 는 제공하되 느리다고 안내한다. 무료 시간 제한은 실제 논문(그림·참고문헌·여러 번 컴파일)으로 다시 재고 정한다. 위 23쪽 문서는 3초 안에 끝났지만 그림과 biber 가 없다.
+
+**E3 — 컨테이너 안의 bubblewrap**(Docker 29.8.2, runc. `--cap-drop ALL`, `no-new-privileges`, 사용자 65534, 읽기 전용 루트, `/tmp` tmpfs. TeX 는 이 기계의 `/usr` 를 읽기 전용으로 붙여 썼다)
+
+| 컨테이너 설정 | bwrap 이 자기 `/proc` 를 붙임 | 결과 |
+| --- | --- | --- |
+| Docker 기본 seccomp | 예·아니오 | **실패**: "No permissions to create new namespace" |
+| seccomp 해제(`unconfined`) | 예 | 실패: `/proc` 를 붙이지 못함 |
+| seccomp 해제 | 아니오 | 성공 |
+| seccomp 해제 + `systempaths=unconfined` | 예 | 성공 |
+| **기본 seccomp + 7개 호출 허용**(`unshare` `setns` `mount` `umount2` `pivot_root` `clone` `clone3`) | 아니오 | **성공** |
+| 위 + `systempaths=unconfined` | 예 | 성공 |
+
+- **Docker 기본 seccomp 로는 bubblewrap 이 돌지 않는다.** seccomp 를 통째로 끄는 대신, Docker 기본 프로필(`moby/profiles` 저장소의 `seccomp/default.json`)에 위 7개만 더한 프로필을 쓰고, bwrap 에서 `--proc /proc` 를 빼는 것을 제안한다(TeX 는 `/proc` 없이 컴파일됐다). "격리" 절의 `bwrap` 명령을 이에 맞게 고쳤다(`--proc /proc` 뺌, `/lib`·`/lib64`·`/bin` 심볼릭 링크와 `PATH`·TeX 설정 환경변수 더함). Ubuntu 패키지 TeX 는 `/etc/texmf`·`/var/lib/texmf` 도 읽기 전용으로 붙여야 했다(`install-tl` 설치는 `<texlive>` 한 곳).
+- 같은 설정에서 탈출 시험 일부(E2 의 앞부분)를 해 봤다.
+  - `\write18{touch …}`: `shell_escape=f` 로 "runsystem … disabled", 파일이 생기지 않음
+  - `\openout` 로 `../escaped.txt`: "I can't write on file" 로 멈춤, 파일이 생기지 않음
+  - `\openin` 으로 `/etc/passwd`: `openin_any=p` 에서 못 읽음. `openin_any=a` 로 풀어도 bwrap 이 그 파일을 붙이지 않아 못 읽음(두 겹이 따로 막는 것을 확인)
+  - 바깥 연결(펄로 1.1.1.1:80): "Network is unreachable"
+  - 환경변수: 컨테이너에 넣은 비밀값이 bwrap 안에서 보이지 않고, bwrap 에 지정한 6개와 셸이 넣는 `PWD` 만 보임
+- **확인하지 못한 것**: gVisor(`runsc`, 설치하지 않음), 자원 고갈(무한 반복·로그 폭주·메모리·프로세스 수), LuaTeX 의 `os.execute`·`io.open`, biber 원격 자료, ZIP 항목 검사. 그리고 **운영 서버의 커널 설정**: Ubuntu 23.10 이상은 AppArmor 로 권한 없는 사용자 이름공간을 막을 수 있는데(`kernel.apparmor_restrict_unprivileged_userns`), 이 기계에는 AppArmor 가 없어 그 경우를 시험하지 못했다. 막혀 있으면 nsjail 이나 작업별 컨테이너로 가야 한다.
+
 E2 목록:
 - 파일 읽기·쓰기 시도: `\input{/etc/passwd}`, `\openout` 로 `../` 쓰기, `\write18`
 - LuaTeX: `os.execute`·`io.open('/etc/…')`·소켓
@@ -303,7 +347,8 @@ E2 목록:
 
 ## 확인하지 못한 것 (이 문서를 쓸 때)
 
-- 실제 이미지 크기, 컴파일 시간, kotex 와 각 엔진의 조합별 결과(E1)
-- bubblewrap 이 컨테이너 안에서 동작하는지(E3)
+- 실제 이미지 크기(E1 은 Ubuntu 패키지로 했고 설치한 TeX·글꼴 패키지의 설치 크기 합이 약 548MB(dpkg 기준) 였다. `install-tl` 이미지는 재지 않았다)
+- 그림·참고문헌이 든 실제 논문의 컴파일 시간(E1 은 그림·biber 없는 표본으로만 쟀다)
+- AppArmor 가 사용자 이름공간을 막는 운영 서버에서 bubblewrap 이 도는지, gVisor 위에서 도는지(E3 은 AppArmor 없는 가상 머신의 Docker 에서만 했다)
 - CodeMirror 6 의 한글 입력기 동작(특히 휴대폰)
 - 브라우저용 엔진(SwiftLaTeX, BusyTeX 의 TeX Live 2026 포크)은 서버 컴파일로 정해서 평가하지 않았습니다.

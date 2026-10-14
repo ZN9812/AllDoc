@@ -60,7 +60,7 @@ LaTeX(논문) 편집 설계는 `docs/LATEX.md` 에 따로 있습니다. 구현�
 
 | # | 내용 | 완료 기준(확인한 것만) |
 | --- | --- | --- |
-| M0 측정·결정 | ① AI 사용량 원장(아래 "계측". **구현함**, 진짜 호출로 쌓인 값은 아직 없음) ② 시스템 프롬프트 캐싱(**구현함**, `promptCache`. 진짜 호출로 캐시 적중은 아직 확인 못 함) ③ 진짜 Claude 호출 확인 ④ SuperDoc 문의(`legal@superdoc.dev`) ⑤ 이름·도메인 후보(상표 검색) ⑥ 병행: LaTeX 실험 E1·E3(`docs/LATEX.md`) | 원장에 토큰·원가가 쌓임. 같은 요청을 반복하면 `cache_read_input_tokens > 0`. 기능별 원가를 `docs/AI.md` 에 기록. E1 시간·이미지 크기 기록 |
+| M0 측정·결정 | ① AI 사용량 원장(아래 "계측". **구현함**, 진짜 호출로 쌓인 값은 아직 없음) ② 시스템 프롬프트 캐싱(**구현함**, `promptCache`. 진짜 호출로 캐시 적중은 아직 확인 못 함) ③ 진짜 Claude 호출 확인 ④ SuperDoc 문의(`legal@superdoc.dev`) ⑤ 이름·도메인 후보(상표 검색) ⑥ 병행: LaTeX 실험 E1·E3(`docs/LATEX.md`. **1차로 함**: Ubuntu 패키지 TeX Live 2023 으로 엔진별 시간·글꼴·한글 대조, Docker 안 bubblewrap 은 기본 seccomp 로는 안 되고 7개 호출을 더한 프로필로 됨. 실제 이미지·AppArmor 서버는 아직) | 원장에 토큰·원가가 쌓임. 같은 요청을 반복하면 `cache_read_input_tokens > 0`. 기능별 원가를 `docs/AI.md` 에 기록. E1 시간·이미지 크기 기록 |
 | M1 계정·요금제(결제 없음) | 사용자 테이블, 세션 무효화, DB 마이그레이션, 요금제·권한 모듈, 탈퇴·파기, 관리자 CLI(수동 요금제 부여), 약관 동의, 백업, 전체 비용 차단기 | 탈퇴 후 옛 쿠키가 401(시험). 수동 부여로 한도가 오름(시험). 기존 종단 시험 통과(`DAILY_AI_LIMIT` 동작 유지). 복구 훈련 기록 |
 | M2 LaTeX MVP(AI 없음) | `docs/LATEX.md` | 그 문서의 M2 기준 |
 | M3 LaTeX AI | `docs/LATEX.md` | 그 문서의 M3 기준 |
