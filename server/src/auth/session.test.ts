@@ -19,16 +19,21 @@ describe('로그인 세션', () => {
   const user = { id: 'g:123', name: '홍길동', email: 'a@b.c' };
 
   it('만든 세션을 다시 읽는다', () => {
-    expect(readSession(newSessionToken(user, SECRET, NOW), SECRET, NOW + 1000)).toEqual(user);
+    expect(readSession(newSessionToken(user, SECRET, NOW, 3), SECRET, NOW + 1000)).toEqual({ ...user, sv: 3 });
+  });
+
+  it('세션 버전이 없는 옛 쿠키는 버전 0 으로 읽는다(계정 버전은 1부터라 무효가 된다)', () => {
+    const legacy = seal({ u: user }, SECRET, NOW, 60);
+    expect(readSession(legacy, SECRET, NOW)?.sv).toBe(0);
   });
 
   it('만료되면 읽지 못한다', () => {
-    const t = newSessionToken(user, SECRET, NOW);
+    const t = newSessionToken(user, SECRET, NOW, 1);
     expect(readSession(t, SECRET, NOW + 31 * 86_400_000)).toBeNull();
   });
 
   it('내용을 바꾸거나 다른 비밀로 만든 것은 읽지 못한다', () => {
-    const t = newSessionToken(user, SECRET, NOW);
+    const t = newSessionToken(user, SECRET, NOW, 1);
     const [payload, mac] = t.split('.') as [string, string];
     const forged = Buffer.from(JSON.stringify({ u: { ...user, id: 'g:999' }, exp: 9_999_999_999 })).toString('base64url');
     expect(readSession(`${forged}.${mac}`, SECRET, NOW)).toBeNull();

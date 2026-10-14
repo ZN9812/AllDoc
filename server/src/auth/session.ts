@@ -53,15 +53,26 @@ export function open<T extends object>(token: string | undefined, secret: string
   }
 }
 
-export function newSessionToken(user: SessionUser, secret: string, nowMs: number): string {
-  return seal({ u: user }, secret, nowMs, SESSION_TTL_SEC);
+/** 쿠키에 담긴 세션. sv 는 계정의 세션 버전이며, 계정 쪽 버전과 다르면(모든 기기 로그아웃·탈퇴) 무효다. */
+export interface SessionClaims extends SessionUser {
+  sv: number;
 }
 
-export function readSession(token: string | undefined, secret: string, nowMs: number): SessionUser | null {
-  const p = open<{ u: SessionUser }>(token, secret, nowMs);
+export function newSessionToken(user: SessionUser, secret: string, nowMs: number, sessionVersion: number): string {
+  return seal({ u: user, sv: sessionVersion }, secret, nowMs, SESSION_TTL_SEC);
+}
+
+/** 서명과 만료만 확인한다. 계정 상태(탈퇴·차단·세션 버전)는 부르는 쪽이 AccountStore 로 확인한다. sv 가 없는 옛 쿠키는 0 으로 읽어 무효가 된다. */
+export function readSession(token: string | undefined, secret: string, nowMs: number): SessionClaims | null {
+  const p = open<{ u: SessionUser; sv?: unknown }>(token, secret, nowMs);
   const u = p?.u;
   if (!u || typeof u.id !== 'string' || u.id.length === 0) return null;
-  return { id: u.id, name: typeof u.name === 'string' ? u.name : null, email: typeof u.email === 'string' ? u.email : null };
+  return {
+    id: u.id,
+    name: typeof u.name === 'string' ? u.name : null,
+    email: typeof u.email === 'string' ? u.email : null,
+    sv: typeof p.sv === 'number' && Number.isInteger(p.sv) ? p.sv : 0,
+  };
 }
 
 export const randomToken = (bytes = 32): string => randomBytes(bytes).toString('base64url');

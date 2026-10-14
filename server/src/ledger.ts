@@ -1,8 +1,6 @@
 // AI 사용량 원장. 요청마다 토큰과 원가를 한 줄씩 남겨 기능별 원가(p50/p95)를 계산하는 데 쓴다.
 // 문서 글·지시문·응답 글은 남기지 않는다(docs/AI.md 의 약속). 남기는 것은 숫자와 모델 이름뿐이다.
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import type { AiMode } from '@alldoc/shared';
 import { costOf } from './ai/pricing';
 import type { ProviderUsage } from './ai/types';
@@ -43,14 +41,6 @@ export interface CostSummaryRow {
   avgCacheReadTokens: number;
 }
 
-const SCHEMA = `CREATE TABLE IF NOT EXISTS ai_events (
-  id INTEGER PRIMARY KEY,
-  at INTEGER NOT NULL, day TEXT NOT NULL, user_id TEXT, plan_id TEXT,
-  task TEXT NOT NULL, provider TEXT NOT NULL, model_requested TEXT NOT NULL, model_served TEXT, fallback INTEGER NOT NULL DEFAULT 0,
-  input_tokens INTEGER, output_tokens INTEGER, cache_write_tokens INTEGER, cache_read_tokens INTEGER,
-  cost_micro_usd INTEGER,
-  doc_chars INTEGER NOT NULL, proposals INTEGER NOT NULL, dropped INTEGER NOT NULL, ms INTEGER NOT NULL, outcome TEXT NOT NULL)`;
-
 /** 순위 기준 백분위(정렬된 배열) */
 function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0;
@@ -58,25 +48,33 @@ function percentile(sorted: number[], p: number): number {
 }
 
 export class LedgerStore {
-  private readonly db: DatabaseSync;
   private readonly insertStmt;
+  private readonly userCostStmt;
+  private readonly dayCostStmt;
   private readonly warned = new Set<string>();
 
+  /** 테이블은 db/index.ts 의 마이그레이션이 만든다. */
   constructor(
-    path: string,
+    private readonly db: DatabaseSync,
     private readonly warn: (message: string) => void = (m) => console.warn(m),
   ) {
-    if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
-    this.db = new DatabaseSync(path);
-    this.db.exec('PRAGMA journal_mode = WAL');
-    this.db.exec('PRAGMA busy_timeout = 5000');
-    this.db.exec(SCHEMA);
-    this.db.exec('CREATE INDEX IF NOT EXISTS ai_events_day ON ai_events (day)');
     this.insertStmt = this.db.prepare(
       `INSERT INTO ai_events (at, day, user_id, task, provider, model_requested, model_served, fallback,
         input_tokens, output_tokens, cache_write_tokens, cache_read_tokens, cost_micro_usd, doc_chars, proposals, dropped, ms, outcome)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
+    this.userCostStmt = this.db.prepare('SELECT COALESCE(SUM(cost_micro_usd), 0) AS n FROM ai_events WHERE user_id = ? AND day >= ? AND day <= ?');
+    this.dayCostStmt = this.db.prepare('SELECT COALESCE(SUM(cost_micro_usd), 0) AS n FROM ai_events WHERE day = ?');
+  }
+
+  /** 한 사용자의 기간 원가 합(마이크로달러). 월 원가 상한에 쓴다. */
+  userCost(userId: string, fromDay: string, toDay: string): number {
+    return (this.userCostStmt.get(userId, fromDay, toDay) as { n: number }).n;
+  }
+
+  /** 하루 전체 원가 합(마이크로달러). 전체 비용 차단기에 쓴다. */
+  dayCost(day: string): number {
+    return (this.dayCostStmt.get(day) as { n: number }).n;
   }
 
   /** 한 줄을 남기고 원가(마이크로달러, 사용량을 모르면 null)를 돌려준다. 단가표에 없는 모델은 한 번만 경고한다. */
@@ -141,9 +139,5 @@ export class LedgerStore {
         avgCacheReadTokens: avg((r) => r.cacheRead),
       };
     });
-  }
-
-  close(): void {
-    this.db.close();
   }
 }

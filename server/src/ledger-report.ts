@@ -4,6 +4,7 @@
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { PRICES_AS_OF } from './ai/pricing';
+import { openDb } from './db';
 import { LedgerStore, type CostSummaryRow } from './ledger';
 import { dayKey } from './quota';
 
@@ -42,9 +43,9 @@ if (process.argv[1] && /ledger-report\.(js|ts)$/.test(process.argv[1])) {
   try {
     if (!existsSync(file)) throw new Error(`원장 파일이 없어요: ${file} (DATA_DIR 를 확인하세요)`);
     const { from, to, json } = parseArgs(process.argv.slice(2), new Date(), timezone);
-    const ledger = new LedgerStore(file);
-    const rows = ledger.summary(from, to);
-    ledger.close();
+    const db = openDb(file);
+    const rows = new LedgerStore(db).summary(from, to);
+    db.close();
     console.log(json ? JSON.stringify({ from, to, pricesAsOf: PRICES_AS_OF, rows }, null, 2) : formatReport(rows, from, to));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));

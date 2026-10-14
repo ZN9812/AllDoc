@@ -4,6 +4,8 @@ import { createApp } from './app';
 import { createProviders } from './ai/providers';
 import { ConfigError, loadConfig } from './config';
 import { loadDotEnv } from './dotenv';
+import { AccountStore } from './auth/accounts';
+import { openDb } from './db';
 import { LedgerStore } from './ledger';
 import { dayKey, QuotaStore } from './quota';
 
@@ -23,15 +25,18 @@ try {
   throw e;
 }
 
-const quota = new QuotaStore(join(config.dataDir, 'alldoc.sqlite'));
-// AI 사용량 원장. 같은 파일의 다른 테이블이며, 원가 집계에 쓰므로 지우지 않는다(보고: server/dist/ledger-report.js).
-const ledger = new LedgerStore(join(config.dataDir, 'alldoc.sqlite'));
+// 데이터 파일 하나(SQLite)를 열고 마이그레이션을 돌린 뒤 저장 모듈들이 같은 연결을 쓴다.
+const db = openDb(join(config.dataDir, 'alldoc.sqlite'));
+const quota = new QuotaStore(db);
+const accounts = new AccountStore(db);
+// AI 사용량 원장. 원가 집계에 쓰므로 지우지 않는다(보고: server/dist/ledger-report.js).
+const ledger = new LedgerStore(db);
 const providers = createProviders(config);
-const app = createApp({ config, quota, providers, ledger });
+const app = createApp({ config, quota, accounts, providers, ledger });
 
-// 지난 사용 기록은 2주 뒤에 지운다(하루 한도 계산에는 오늘 기록만 필요하다).
+// 지난 사용 기록은 62일 뒤에 지운다(요금제의 월 한도를 계산하려면 이번 달 기록이 있어야 한다).
 const prune = () => {
-  const cutoff = dayKey(new Date(Date.now() - 14 * 86_400_000), config.timezone);
+  const cutoff = dayKey(new Date(Date.now() - 62 * 86_400_000), config.timezone);
   quota.prune(cutoff);
 };
 prune();
@@ -51,8 +56,7 @@ const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
 function shutdown(signal: string): void {
   console.log(`${signal} 신호를 받아 종료합니다.`);
   server.close(() => {
-    quota.close();
-    ledger.close();
+    db.close();
     process.exit(0);
   });
   setTimeout(() => process.exit(0), 10_000).unref();

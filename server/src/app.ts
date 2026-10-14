@@ -21,6 +21,7 @@ import {
   SESSION_TTL_SEC,
   type SessionUser,
 } from './auth/session';
+import type { AccountStore } from './auth/accounts';
 import type { Config } from './config';
 import type { AiOutcome, LedgerStore } from './ledger';
 import { dayKey, quotaOf, type QuotaStore } from './quota';
@@ -29,6 +30,7 @@ import { createStaticHandler } from './static';
 export interface AppDeps {
   config: Config;
   quota: QuotaStore;
+  accounts: AccountStore;
   providers: Providers;
   /** AI 사용량 원장. 없으면 남기지 않는다(시험 등). */
   ledger?: LedgerStore;
@@ -65,14 +67,29 @@ function fail(c: Context, status: 400 | 401 | 403 | 404 | 413 | 422 | 429 | 500 
 }
 
 export function createApp(deps: AppDeps): Hono {
-  const { config, quota, providers } = deps;
+  const { config, quota, accounts, providers } = deps;
   const now = deps.now ?? (() => new Date());
   const log = deps.log ?? ((m: string, extra?: Record<string, unknown>) => console.log(extra ? `${m} ${JSON.stringify(extra)}` : m));
   const app = new Hono();
 
   const cookieOpts = (maxAge: number) => ({ httpOnly: true, sameSite: 'Lax' as const, secure: config.secureCookies, path: '/', maxAge });
-  const userOf = (c: Context): SessionUser | null =>
-    config.authMode === 'none' ? null : readSession(getCookie(c, SESSION_COOKIE), config.sessionSecret, now().getTime());
+  /** 로그인한 사용자. 쿠키 서명·만료에 더해 계정이 있고, 탈퇴·차단되지 않았고, 세션 버전이 같아야 한다. */
+  const userOf = (c: Context): SessionUser | null => {
+    if (config.authMode === 'none') return null;
+    const s = readSession(getCookie(c, SESSION_COOKIE), config.sessionSecret, now().getTime());
+    if (!s) return null;
+    const a = accounts.get(s.id);
+    if (!a || a.deletedAt !== null || a.status !== 'active' || a.sessionVersion !== s.sv) return null;
+    return { id: a.id, name: a.name, email: a.email };
+  };
+
+  /** 로그인 처리: 계정을 만들거나 갱신하고 세션 쿠키를 준다. 차단된 계정이면 false. */
+  const startSession = (c: Context, user: SessionUser): boolean => {
+    const a = accounts.login(user, now().getTime());
+    if (a.status !== 'active') return false;
+    setCookie(c, SESSION_COOKIE, newSessionToken(user, config.sessionSecret, now().getTime(), a.sessionVersion), cookieOpts(SESSION_TTL_SEC));
+    return true;
+  };
 
   const securityHeaders: MiddlewareHandler = async (c, next) => {
     await next();
@@ -136,7 +153,7 @@ export function createApp(deps: AppDeps): Hono {
     if (config.authMode === 'dev') {
       const name = (c.req.query('user') ?? '개발용 사용자').trim().slice(0, 40) || '개발용 사용자';
       const user: SessionUser = { id: `dev:${name}`, name, email: null };
-      setCookie(c, SESSION_COOKIE, newSessionToken(user, config.sessionSecret, nowMs), cookieOpts(SESSION_TTL_SEC));
+      if (!startSession(c, user)) return c.redirect('/?login=blocked');
       return c.redirect(next);
     }
 
@@ -155,7 +172,7 @@ export function createApp(deps: AppDeps): Hono {
     if (config.authMode !== 'google' || !config.google || !saved || !code || !state || state !== saved.state) return c.redirect('/?login=failed');
     try {
       const user = await loginWithCode(config.google, `${config.publicUrl}/api/auth/callback`, code, saved.verifier, deps.fetch);
-      setCookie(c, SESSION_COOKIE, newSessionToken(user, config.sessionSecret, now().getTime()), cookieOpts(SESSION_TTL_SEC));
+      if (!startSession(c, user)) return c.redirect('/?login=blocked');
       return c.redirect(safeNext(saved.next));
     } catch (e) {
       log('구글 로그인 실패', { reason: e instanceof Error ? e.message : String(e) });

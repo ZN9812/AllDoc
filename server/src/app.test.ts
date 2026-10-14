@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp, type AppDeps } from './app';
 import { MockProvider } from './ai/mock';
 import { ProviderFailedError, ProviderRefusedError, type AiProvider, type ProviderResult } from './ai/types';
+import { AccountStore } from './auth/accounts';
+import { openDb } from './db';
 import { LedgerStore } from './ledger';
 import { QuotaStore } from './quota';
 import { testConfig } from './test-support/helpers';
@@ -23,18 +25,21 @@ function setup(env: Record<string, string> = {}, over: Partial<AppDeps> = {}) {
   writeFileSync(join(dist, 'favicon.svg'), '<svg/>');
 
   const config = testConfig({ WEB_DIST: dist, ...env });
-  const quota = new QuotaStore(':memory:');
+  const db = openDb(':memory:');
+  const quota = new QuotaStore(db);
+  const accounts = new AccountStore(db);
   const provider = new MockProvider();
   const deps: AppDeps = {
     config,
     quota,
+    accounts,
     providers: { chat: provider, format_check: provider },
     now: () => NOW,
     log: () => undefined,
     ...over,
   };
   const app = createApp(deps);
-  return { app, quota, config, deps };
+  return { app, quota, accounts, db, config, deps };
 }
 
 type App = ReturnType<typeof setup>['app'];
@@ -401,19 +406,64 @@ describe('웹 앱 제공', () => {
   });
 });
 
+describe('계정과 세션 무효화', () => {
+  const me = async (app: App, cookie: string) => (await (await app.request('/api/me', { headers: { cookie } })).json()) as MeResponse;
+
+  it('로그인하면 계정이 생긴다', async () => {
+    const { app, accounts } = setup();
+    await login(app);
+    expect(accounts.get('dev:테스터')).toMatchObject({ name: '테스터', status: 'active', sessionVersion: 1 });
+  });
+
+  it('세션 버전을 올리면(모든 기기 로그아웃) 옛 쿠키로는 로그인 상태가 아니고 AI 도 401', async () => {
+    const { app, accounts } = setup();
+    const cookie = await login(app);
+    expect((await me(app, cookie)).authenticated).toBe(true);
+    accounts.bumpSession('dev:테스터');
+    expect((await me(app, cookie)).authenticated).toBe(false);
+    expect((await post(app, chatBody(), cookie)).status).toBe(401);
+    // 다시 로그인하면 새 버전의 쿠키를 받는다
+    expect((await me(app, await login(app))).authenticated).toBe(true);
+  });
+
+  it('탈퇴한 계정의 쿠키는 401', async () => {
+    const { app, accounts } = setup();
+    const cookie = await login(app);
+    accounts.markDeleted('dev:테스터', NOW.getTime());
+    expect((await post(app, chatBody(), cookie)).status).toBe(401);
+  });
+
+  it('차단한 계정은 쿠키가 무효이고 다시 로그인할 수 없다', async () => {
+    const { app, accounts } = setup();
+    const cookie = await login(app);
+    accounts.setStatus('dev:테스터', 'banned');
+    expect((await me(app, cookie)).authenticated).toBe(false);
+    const res = await app.request('/api/auth/login?user=' + encodeURIComponent('테스터'));
+    expect(res.headers.get('location')).toBe('/?login=blocked');
+    expect(res.headers.get('set-cookie') ?? '').not.toContain('alldoc_session=ey');
+  });
+
+  it('계정 행이 없는 쿠키(서명은 맞음)는 무효다', async () => {
+    const { app, db } = setup();
+    const cookie = await login(app);
+    db.exec('DELETE FROM users');
+    expect((await me(app, cookie)).authenticated).toBe(false);
+  });
+});
+
 describe('AI 사용량 원장 기록', () => {
   const usage = { modelRequested: 'claude-opus-5-5', modelServed: 'claude-opus-5-5', fallback: false, parts: [{ model: 'claude-opus-5-5', inputTokens: 1_000, outputTokens: 100, cacheWriteTokens: 0, cacheWrite1hTokens: 0, cacheReadTokens: 0 }] };
   const rows = (ledger: LedgerStore) => ledger.summary('2026-10-01', '2026-10-01');
 
   it('성공한 요청은 결과와 원가를 남긴다(데모 AI 는 모델 mock, 원가 0)', async () => {
-    const ledger = new LedgerStore(':memory:');
+    const ledger = new LedgerStore(openDb(':memory:'));
     const { app } = setup({}, { ledger });
     expect((await post(app, chatBody(), await login(app))).status).toBe(200);
     expect(rows(ledger)).toMatchObject([{ task: 'chat', model: 'mock', requests: 1, ok: 1, noUsage: 0, totalMicroUsd: 0 }]);
   });
 
   it('거절과 응답 뒤 실패도 사용량과 함께 남기고, 연결 실패는 원가를 비워 둔다', async () => {
-    const ledger = new LedgerStore(':memory:');
+    const ledger = new LedgerStore(openDb(':memory:'));
     const refusing: AiProvider = { id: 'anthropic', demo: false, propose: async () => { throw new ProviderRefusedError(undefined, usage); } };
     const cut: AiProvider = { id: 'anthropic', demo: false, propose: async () => { throw new ProviderFailedError('끊겼어요', undefined, usage); } };
     const down: AiProvider = { id: 'anthropic', demo: false, propose: async () => { throw new ProviderFailedError('연결하지 못했어요'); } };
@@ -426,8 +476,9 @@ describe('AI 사용량 원장 기록', () => {
   });
 
   it('원장 기록이 실패해도 사용자 응답은 그대로 간다', async () => {
-    const ledger = new LedgerStore(':memory:');
-    ledger.close(); // 닫힌 DB 에 쓰면 오류가 난다
+    const closed = openDb(':memory:');
+    const ledger = new LedgerStore(closed);
+    closed.close(); // 닫힌 DB 에 쓰면 오류가 난다
     const log = vi.fn();
     const { app } = setup({}, { ledger, log });
     expect((await post(app, chatBody(), await login(app))).status).toBe(200);
