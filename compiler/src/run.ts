@@ -176,7 +176,7 @@ export async function runJob(job: JobInput, opt: RunOptions): Promise<JobResult>
     let log = mainLog ? tailBytes(mainLog, opt.logBytes) : tailBytes(Buffer.concat(out), opt.logBytes);
     if (blg) log += `\n\n=== ${posix.basename(base)}.blg ===\n${tailBytes(blg, 256 * 1024)}`;
     if (!mainLog && outBytes > 0) log = `latexmk 출력:\n${log}`;
-    if (timedOut) return { status: 'timeout', log, pdf: null, wallMs };
+    if (timedOut) return { status: 'timeout', log: `시간 제한(${job.timeoutSec}초)을 넘어 컴파일을 멈췄어요.\n${log}`, pdf: null, wallMs };
 
     let pdf: Uint8Array | null = null;
     let status: CompileStatus = 'error';

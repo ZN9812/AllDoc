@@ -47,6 +47,10 @@ services:
       - no-new-privileges:true
       # Docker 기본 seccomp 에 bubblewrap 이 쓰는 7개 호출(unshare setns mount umount2 pivot_root clone clone3)만 더한 프로필
       - seccomp=./compiler/seccomp.json
+      # Docker 의 기본 AppArmor 프로필(docker-default)은 mount 를 막아 bubblewrap 이 "Failed to make / slave" 로 멈춘다(CI 에서 확인).
+      # 그래서 이 컨테이너만 AppArmor 를 풀고, 대신 seccomp·cap_drop·no-new-privileges·읽기 전용 루트와 작업마다의 bubblewrap 으로 막는다.
+      # mount 만 허용하는 AppArmor 프로필을 따로 만들지는 결정 필요(docs/DEPLOY.md "LaTeX 컴파일").
+      - apparmor=unconfined
     pids_limit: 512
     mem_limit: 4g
     cpus: 2
