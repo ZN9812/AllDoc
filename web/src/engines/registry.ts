@@ -4,13 +4,15 @@ import type { EngineProps } from './types';
 
 type EngineComponent = LazyExoticComponent<ComponentType<EngineProps>>;
 
-// 무거운 편집기(rhwp, SuperDoc, pdf.js)는 해당 형식을 열 때만 내려받는다.
+// 무거운 편집기(rhwp, SuperDoc, pdf.js, CodeMirror)는 해당 형식을 열 때만 내려받는다.
 const engines: Record<DocKind, EngineComponent> = {
   txt: lazy(() => import('./TextEngine')),
   md: lazy(() => import('./TextEngine')),
   pdf: lazy(() => import('./PdfEngine')),
   hwp: lazy(() => import('./HwpEngine')),
   hwpx: lazy(() => import('./HwpEngine')),
+  // LaTeX: CodeMirror 6 과 fflate 는 tex 를 열 때만 내려받는다.
+  tex: lazy(() => import('./TexEngine')),
   // VITE_DISABLE_DOCX=1 로 빌드하면 SuperDoc 이 결과물에서 빠진다(조건이 이 자리에 있어야 빌드 도구가 안 쓰는 갈래를 뺀다).
   docx: lazy<ComponentType<EngineProps>>(() => (import.meta.env.VITE_DISABLE_DOCX === '1' ? import('./DocxDisabled') : import('./DocxEngine'))),
 };

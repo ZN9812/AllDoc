@@ -1,4 +1,4 @@
-import { areaLabel, areaName, placeLabel, textGuard, type AreaPlace, type CellPlace, type DocSummary, type Proposal } from '@alldoc/shared';
+import { areaLabel, areaName, placeLabel, sourceLabel, textGuard, type AreaPlace, type CellPlace, type DocSummary, type Proposal, type SourcePlace } from '@alldoc/shared';
 
 /**
  * 제안의 각 변경에 "제안을 만들 때 본 문단 글의 지문"을 붙인다.
@@ -43,8 +43,29 @@ export function placeOfParagraphs(paragraphs: number[], places: ReadonlyMap<numb
   return `${names} ${outside.length}곳${outside.length < unique.length ? ' 포함' : ''}`;
 }
 
-/** 본문 밖의 글(표 칸, 머리말·꼬리말·각주·미주)을 고치는 제안에 위치 문구를 붙인다(변경 내역 카드에 보여 준다). 본문뿐인 문서에서는 그대로 돌려준다. */
+/** LaTeX 원고의 위치 문구: 한 블록이면 "main.tex 42행", 한 파일 여러 블록이면 "main.tex 3곳", 여러 파일이면 "파일 2개 4곳". */
+export function sourceOfParagraphs(paragraphs: number[], srcs: ReadonlyMap<number, SourcePlace>): string | undefined {
+  const found = [...new Set(paragraphs)].map((i) => srcs.get(i)).filter((s): s is SourcePlace => s !== undefined);
+  const first = found[0];
+  if (!first) return undefined;
+  if (found.length === 1) return sourceLabel(first);
+  const files = new Set(found.map((s) => s.file));
+  return files.size === 1 ? `${first.file} ${found.length}곳` : `파일 ${files.size}개 ${found.length}곳`;
+}
+
+/** 본문 밖의 글(표 칸, 머리말·꼬리말·각주·미주)을 고치는 제안에 위치 문구를 붙인다(변경 내역 카드에 보여 준다). 본문뿐인 문서에서는 그대로 돌려준다. LaTeX 원고는 늘 파일·줄을 붙인다. */
 export function attachPlaces(proposals: Proposal[], summary: DocSummary): Proposal[] {
+  const srcs = new Map<number, SourcePlace>();
+  for (const p of summary.paragraphs) if (p.src) srcs.set(p.index, p.src);
+  if (srcs.size > 0) {
+    return proposals.map((p) => {
+      const place = sourceOfParagraphs(
+        p.ops.map((op) => op.paragraph),
+        srcs,
+      );
+      return place === undefined ? p : { ...p, place };
+    });
+  }
   const places = new Map<number, Place>();
   for (const p of summary.paragraphs) {
     const where = p.cell ?? p.area;

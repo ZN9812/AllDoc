@@ -1,0 +1,42 @@
+% !TEX program = xelatex
+% SPDX-License-Identifier: MIT (templates/latex/LICENSE). 이 템플릿 틀만 MIT 이고, 여기에 쓴 글은 쓴 사람의 것입니다.
+% 한국어 보고서·학위논문 초안 템플릿: XeLaTeX + kotex, 장·차례·참고문헌(biblatex + biber).
+\documentclass[11pt,a4paper,oneside]{report}
+
+\usepackage[hangul]{kotex}  % hangul: 날짜·장 제목 등을 한국어 방식으로
+\setmainhangulfont{Noto Serif CJK KR}[AutoFakeSlant=0.15]  % 한글 기울임꼴이 없어 기울여 만든다
+\setsanshangulfont{Noto Sans CJK KR}[AutoFakeSlant=0.15]
+\setmonohangulfont{Noto Sans Mono CJK KR}
+
+\usepackage[margin=28mm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage[backend=biber,style=numeric,sorting=none]{biblatex}
+\addbibresource{refs.bib}
+\usepackage[hidelinks]{hyperref}
+
+\AtBeginDocument{%
+  \renewcommand{\tablename}{표}%
+  \renewcommand{\figurename}{그림}%
+  \renewcommand{\contentsname}{차례}%
+  \renewcommand{\listtablename}{표 차례}%
+  \renewcommand{\listfigurename}{그림 차례}%
+  \renewcommand{\bibname}{참고 문헌}%
+  \renewcommand{\abstractname}{요약}%
+}
+\DefineBibliographyStrings{english}{references={참고 문헌}, bibliography={참고 문헌}}
+
+\title{보고서 제목}
+\author{홍길동}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\include{chapters/intro}
+\include{chapters/method}
+
+\printbibliography[heading=bibintoc]
+\end{document}

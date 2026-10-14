@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import { proposalParagraphs, type Criteria, type Op, type Proposal, type StyleProfile } from '@alldoc/shared';
 import type { ConsistencyResult } from '../ai/consistency';
-import type { EngineHandle, HighlightState, HighlightTarget, PagesApi } from '../engines/types';
+import type { EngineHandle, HighlightState, HighlightTarget, PagesApi, TexScope } from '../engines/types';
 import { toast } from '../state/toast';
 
-export type Tab = 'chat' | 'format' | 'changes';
+export type Tab = 'chat' | 'format' | 'changes' | 'compile';
 export type ItemStatus = 'pending' | 'applied' | 'dismissed' | 'stale' | 'failed';
 
 export interface ProposalItem {
@@ -45,6 +45,8 @@ interface EditorState {
   consistency: ConsistencyResult | null;
   /** 서식 점검 결과를 눌렀을 때 잠깐 진하게 표시할 곳 */
   flashTargets: HighlightTarget[];
+  /** LaTeX 프로젝트에서 AI 에 보낼 범위 */
+  texScope: TexScope;
 
   reset: () => void;
   setEngine: (e: EngineHandle | null) => void;
@@ -58,6 +60,7 @@ interface EditorState {
   setRulesText: (t: string) => void;
   setReference: (r: ReferenceDoc | null) => void;
   setConsistency: (r: ConsistencyResult | null) => void;
+  setTexScope: (s: TexScope) => void;
 
   addProposals: (ps: Proposal[]) => number;
   applyItem: (id: string) => Promise<void>;
@@ -151,6 +154,7 @@ const initial = {
   reference: null,
   consistency: null,
   flashTargets: [] as HighlightTarget[],
+  texScope: 'file' as TexScope,
 };
 
 export const useEditor = create<EditorState>((set, get) => {
@@ -180,6 +184,7 @@ export const useEditor = create<EditorState>((set, get) => {
     setRulesText: (rulesText) => set({ rulesText }),
     setReference: (reference) => set({ reference }),
     setConsistency: (consistency) => set({ consistency }),
+    setTexScope: (texScope) => set({ texScope }),
 
     addProposals: (ps) => {
       let added = 0;

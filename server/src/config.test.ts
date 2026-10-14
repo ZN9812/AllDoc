@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ConfigError, DEFAULT_MODEL } from './config';
+import { DEFAULT_COMPILE_LIMITS } from '@alldoc/shared';
+import { ConfigError, DEFAULT_MODEL, loadConfig } from './config';
 import { testConfig } from './test-support/helpers';
 
 const problems = (fn: () => unknown): string[] => {
@@ -15,7 +16,9 @@ const problems = (fn: () => unknown): string[] => {
 describe('서버 설정', () => {
   it('기본값: 한도 5회, 한국 시간, Claude 기본 모델', () => {
     const c = testConfig({ DAILY_AI_LIMIT: '', AI_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'k' });
-    expect(c.dailyLimit).toBe(5);
+    expect(c.plans).toEqual({ defaultPlanId: 'free', list: [{ id: 'free', name: '무료', limits: { aiRequestsPerDay: 5, aiRequestsPerMonth: null, aiMaxDocChars: 120_000, aiCostCapMicroUsdPerMonth: null, ...DEFAULT_COMPILE_LIMITS } }] });
+    expect(c.aiDailyBudgetMicroUsd).toBeNull();
+    expect(c.terms).toBeNull();
     expect(c.timezone).toBe('Asia/Seoul');
     expect(c.ai.chat.model).toBe(DEFAULT_MODEL);
     expect(c.ai.chat.effort).toBe('medium');
@@ -114,11 +117,63 @@ describe('AI 설정 파일', () => {
     expect(testConfig(env, file({ default: { fallbacks: 'off' } })).ai.chat.fallbacks).toBe(false);
   });
 
+  it('프롬프트 캐싱은 기본으로 시스템 프롬프트만, 작업마다 바꿀 수 있다', () => {
+    const c = testConfig(env, file({ tasks: { chat: { promptCache: 'document' }, format_check: { promptCache: 'off' } } }));
+    expect(testConfig(env, file({})).ai.chat.promptCache).toBe('system');
+    expect(c.ai.chat.promptCache).toBe('document');
+    expect(c.ai.format_check.promptCache).toBe('off');
+    expect(problems(() => testConfig(env, file({ default: { promptCache: 'all' } }))).length).toBeGreaterThan(0);
+  });
+
   it('모르는 항목·잘못된 값·충돌은 시작할 때 알려 준다', () => {
     expect(problems(() => testConfig(env, file({ default: { modle: 'x' } }))).length).toBeGreaterThan(0);
     expect(problems(() => testConfig(env, file({ default: { effort: 'extreme' } }))).length).toBeGreaterThan(0);
     expect(problems(() => testConfig(env, file({ default: { systemPrompt: 'a', systemPromptFile: 'b' } }))).join('\n')).toContain('함께 쓸 수 없어요');
     expect(problems(() => testConfig(env, file({ default: { apiKeyEnv: 'MISSING_ENV' } }))).join('\n')).toContain('MISSING_ENV');
     expect(problems(() => testConfig({ AI_CONFIG_PATH: '/nope.json' })).join('\n')).toContain('읽지 못했어요');
+  });
+});
+
+describe('요금제 설정', () => {
+  const env = { AUTH_MODE: 'dev', SESSION_SECRET: 's'.repeat(40), AI_PROVIDER: 'mock', PLANS_CONFIG_PATH: '/srv/plans.json' };
+  const plan = (id: string, perDay: number | null = 5) => ({ id, name: id, limits: { aiRequestsPerDay: perDay, aiRequestsPerMonth: 100, aiMaxDocChars: 50_000, aiCostCapMicroUsdPerMonth: 3_000_000 } });
+  const load = (file: unknown, extra: Record<string, string> = {}) =>
+    loadConfig({ env: { ...env, ...extra }, readFile: () => JSON.stringify(file), moduleDir: '/srv/app/server/dist', randomSecret: () => 'r'.repeat(64) });
+  const problemsOf = (fn: () => unknown) => {
+    try {
+      fn();
+      return [];
+    } catch (e) {
+      return (e as ConfigError).problems;
+    }
+  };
+
+  it('요금제 파일을 읽는다', () => {
+    const c = load({ default: 'free', plans: [plan('free'), plan('pro', null)] });
+    expect(c.plans.defaultPlanId).toBe('free');
+    expect(c.plans.list.map((p) => p.id)).toEqual(['free', 'pro']);
+  });
+
+  it('기본 요금제가 없거나 id 가 겹치거나 상한이 범위를 넘으면 시작할 때 알려 준다', () => {
+    expect(problemsOf(() => load({ default: 'gold', plans: [plan('free')] })).join('\n')).toContain('"gold"');
+    expect(problemsOf(() => load({ default: 'free', plans: [plan('free'), plan('free')] })).join('\n')).toContain('겹쳐요');
+    const big = { ...plan('free'), limits: { ...plan('free').limits, aiMaxDocChars: 999_999 } };
+    expect(problemsOf(() => load({ default: 'free', plans: [big] })).length).toBeGreaterThan(0);
+    expect(problemsOf(() => load({ default: 'free', plans: [{ ...plan('free'), extra: 1 }] })).length).toBeGreaterThan(0);
+  });
+
+  it('백업은 기본으로 DATA_DIR/backups 에 14개, BACKUP_KEEP=0 이면 끈다', () => {
+    const plans = { default: 'free', plans: [plan('free')] };
+    expect(load(plans, { DATA_DIR: '/srv/data' }).backup).toEqual({ dir: '/srv/data/backups', keep: 14 });
+    expect(load(plans, { BACKUP_DIR: '/mnt/bk', BACKUP_KEEP: '0' }).backup).toEqual({ dir: '/mnt/bk', keep: 0 });
+    expect(problemsOf(() => load(plans, { BACKUP_KEEP: '-1' })).length).toBeGreaterThan(0);
+  });
+
+  it('전체 하루 비용 상한은 마이크로달러로, 약관 판은 주소와 함께 읽는다', () => {
+    const terms = { TERMS_VERSION: '2026-10', TERMS_URL: 'https://example.com/terms', PRIVACY_URL: 'https://example.com/privacy' };
+    const c = load({ default: 'free', plans: [plan('free')] }, { AI_DAILY_BUDGET_USD: '12.5', ...terms });
+    expect(c.aiDailyBudgetMicroUsd).toBe(12_500_000);
+    expect(c.terms).toEqual({ version: '2026-10', termsUrl: 'https://example.com/terms', privacyUrl: 'https://example.com/privacy' });
+    expect(problemsOf(() => load({ default: 'free', plans: [plan('free')] }, { TERMS_VERSION: '2026-10' })).join('\n')).toContain('PRIVACY_URL');
   });
 });

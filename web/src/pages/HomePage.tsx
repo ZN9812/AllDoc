@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import DropZone from '../components/DropZone';
 import Nav from '../components/Nav';
 import RecentList from '../components/RecentList';
+import TexTemplates from '../components/TexTemplates';
 import TopBar from '../components/TopBar';
 import { filterDocs } from '../lib/docs';
 import { openFirstFile } from '../lib/openFile';
@@ -32,6 +33,7 @@ export default function HomePage() {
         <main className="main">
           <h1 className="sr-only">새 문서 열기</h1>
           <DropZone onFiles={onFiles} />
+          <TexTemplates onCreated={(id) => nav(`/edit/${id}`)} />
           <section aria-labelledby="recent-title" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="sec-head">
               <h2 id="recent-title">최근 문서</h2>

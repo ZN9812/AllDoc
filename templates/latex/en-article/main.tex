@@ -1,0 +1,46 @@
+% !TEX program = pdflatex
+% SPDX-License-Identifier: MIT (templates/latex/LICENSE). 이 템플릿 틀만 MIT 이고, 여기에 쓴 글은 쓴 사람의 것입니다.
+% English article template: pdfLaTeX.
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=25mm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage[hidelinks]{hyperref}
+
+\title{Title of the Paper}
+\author{Author Name\\ Affiliation}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+A short summary of the purpose, method and results.
+\end{abstract}
+
+\section{Introduction}\label{sec:intro}
+Inline math such as $a^2 + b^2 = c^2$ and display math:
+\begin{equation}\label{eq:euler}
+  e^{i\pi} + 1 = 0
+\end{equation}
+Equation~\eqref{eq:euler} is Euler's identity.
+
+\section{Results}
+Table~\ref{tab:result} shows the results.
+\begin{table}[h]
+  \centering
+  \caption{Results}\label{tab:result}
+  \begin{tabular}{lr}
+    \toprule
+    Method & Accuracy (\%) \\
+    \midrule
+    Baseline & 81.2 \\
+    Proposed & 87.5 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\end{document}

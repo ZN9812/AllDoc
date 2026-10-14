@@ -11,15 +11,16 @@
   "workspaces": [
     "shared",
     "web",
-    "server"
+    "server",
+    "compiler"
   ],
   "scripts": {
     "dev:server": "npm run dev -w server",
     "dev:web": "npm run dev -w web",
     "build": "npm run build -w web && npm run build -w server",
     "start": "npm run start -w server",
-    "typecheck": "npm run typecheck -w shared -w web -w server",
-    "test": "npm run test -w shared -w web -w server",
+    "typecheck": "npm run typecheck -w shared -w web -w server -w compiler",
+    "test": "npm run test -w shared -w web -w server -w compiler",
     "test:e2e": "npm run build && playwright test",
     "check": "npm run typecheck && npm run test && npm run check:licenses",
     "check:licenses": "node scripts/check-licenses.mjs"

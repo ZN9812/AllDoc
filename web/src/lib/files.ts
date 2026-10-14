@@ -2,25 +2,28 @@ import { baseName, extOf, kindFromName, MAX_FILE_BYTES, type DocKind } from '@al
 import { DOCX_ENABLED } from './features';
 
 export type FileCheck =
-  | { ok: true; kind: DocKind }
+  | { ok: true; kind: DocKind; /** .zip 은 LaTeX 프로젝트로 가져온다 */ zip?: boolean }
   | { ok: false; message: string };
+
+const FORMATS = () => (DOCX_ENABLED ? 'HWP, HWPX, DOCX, PDF, TXT, MD, TEX(ZIP)' : 'HWP, HWPX, PDF, TXT, MD, TEX(ZIP)');
 
 /** 올린 파일을 열 수 있는지 확인한다. 안 되면 사용자에게 보여줄 문장을 돌려준다. */
 export function checkUpload(file: { name: string; size: number }): FileCheck {
-  const kind = kindFromName(file.name);
+  const zip = extOf(file.name) === 'zip';
+  const kind = zip ? 'tex' : kindFromName(file.name);
   if (!kind) {
     const ext = extOf(file.name);
     const what = ext ? `.${ext} 형식은` : '이 파일은';
-    return { ok: false, message: `${what} 아직 열 수 없어요. ${DOCX_ENABLED ? 'HWP, HWPX, DOCX, PDF, TXT, MD' : 'HWP, HWPX, PDF, TXT, MD'} 파일을 올려 주세요.` };
+    return { ok: false, message: `${what} 아직 열 수 없어요. ${FORMATS()} 파일을 올려 주세요.` };
   }
   if (kind === 'docx' && !DOCX_ENABLED) {
-    return { ok: false, message: '이 서버에서는 Word(DOCX) 문서를 지원하지 않아요. HWP, HWPX, PDF, TXT, MD 파일을 올려 주세요.' };
+    return { ok: false, message: `이 서버에서는 Word(DOCX) 문서를 지원하지 않아요. ${FORMATS()} 파일을 올려 주세요.` };
   }
   if (file.size === 0) return { ok: false, message: '빈 파일이에요.' };
   if (file.size > MAX_FILE_BYTES) {
     return { ok: false, message: `파일이 너무 커요. ${Math.floor(MAX_FILE_BYTES / 1024 / 1024)}MB 이하만 열 수 있어요.` };
   }
-  return { ok: true, kind };
+  return zip ? { ok: true, kind, zip } : { ok: true, kind };
 }
 
 /**

@@ -1,3 +1,4 @@
+import { openDb } from './db';
 import { describe, expect, it } from 'vitest';
 import { dayKey, QuotaStore, quotaOf } from './quota';
 
@@ -11,14 +12,13 @@ describe('하루가 바뀌는 시각', () => {
 });
 
 describe('사용 횟수 한도', () => {
-  const make = () => new QuotaStore(':memory:');
+  const make = () => new QuotaStore(openDb(':memory:'));
 
   it('한도까지만 쓸 수 있고, 넘으면 거절한다', () => {
     const q = make();
     for (let i = 1; i <= 3; i++) expect(q.consume('u1', '2026-10-01', 3)).toEqual({ ok: true, used: i });
     expect(q.consume('u1', '2026-10-01', 3)).toEqual({ ok: false, used: 3 });
     expect(q.used('u1', '2026-10-01')).toBe(3);
-    q.close();
   });
 
   it('사용자와 날짜별로 따로 센다', () => {
@@ -27,7 +27,6 @@ describe('사용 횟수 한도', () => {
     expect(q.consume('u1', '2026-10-01', 1).ok).toBe(false);
     expect(q.consume('u2', '2026-10-01', 1).ok).toBe(true);
     expect(q.consume('u1', '2026-10-02', 1).ok).toBe(true);
-    q.close();
   });
 
   it('돌려주면 다시 쓸 수 있고, 0 아래로 내려가지 않는다', () => {
@@ -39,7 +38,6 @@ describe('사용 횟수 한도', () => {
     q.refund('nobody', '2026-10-01');
     expect(q.used('u1', '2026-10-01')).toBe(0);
     expect(q.consume('u1', '2026-10-01', 1).ok).toBe(true);
-    q.close();
   });
 
   it('지난 기록만 지운다', () => {
@@ -49,7 +47,6 @@ describe('사용 횟수 한도', () => {
     q.prune('2026-09-20');
     expect(q.used('u1', '2026-09-01')).toBe(0);
     expect(q.used('u1', '2026-10-01')).toBe(1);
-    q.close();
   });
 
   it('남은 횟수 계산', () => {

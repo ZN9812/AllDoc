@@ -1,6 +1,7 @@
 // 파일 형식과 관련된 공통 정의
 
-export const DOC_KINDS = ['hwp', 'hwpx', 'docx', 'pdf', 'txt', 'md'] as const;
+/** tex 는 LaTeX 프로젝트(파일 여러 개)다. .tex 하나를 올리면 파일 하나짜리 프로젝트가 되고, .zip 은 종류가 아니라 가져오기 경로다. */
+export const DOC_KINDS = ['hwp', 'hwpx', 'docx', 'pdf', 'txt', 'md', 'tex'] as const;
 export type DocKind = (typeof DOC_KINDS)[number];
 
 const EXT_TO_KIND: Record<string, DocKind> = {
@@ -12,6 +13,7 @@ const EXT_TO_KIND: Record<string, DocKind> = {
   text: 'txt',
   md: 'md',
   markdown: 'md',
+  tex: 'tex',
 };
 
 export const KIND_LABEL: Record<DocKind, string> = {
@@ -21,6 +23,7 @@ export const KIND_LABEL: Record<DocKind, string> = {
   pdf: 'PDF',
   txt: 'TXT',
   md: 'MD',
+  tex: 'LaTeX',
 };
 
 export const KIND_MIME: Record<DocKind, string> = {
@@ -30,10 +33,12 @@ export const KIND_MIME: Record<DocKind, string> = {
   pdf: 'application/pdf',
   txt: 'text/plain;charset=utf-8',
   md: 'text/markdown;charset=utf-8',
+  /** 프로젝트 전체를 내려받으면 ZIP 이다 */
+  tex: 'application/zip',
 };
 
 /** <input type="file" accept="..."> 에 넣는 값 */
-export const ACCEPT_ATTR = '.hwp,.hwpx,.docx,.pdf,.txt,.md,.markdown';
+export const ACCEPT_ATTR = '.hwp,.hwpx,.docx,.pdf,.txt,.md,.markdown,.tex,.zip';
 
 /** 브라우저에서 한 파일로 받아들이는 최대 크기 */
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;

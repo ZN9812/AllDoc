@@ -10,6 +10,8 @@ export async function summarizeBlob(kind: DocKind, blob: Blob): Promise<DocSumma
       return summarizeText(await blob.text(), kind);
     case 'pdf':
       throw new Error('PDF는 서식을 읽을 수 없어요.');
+    case 'tex':
+      throw new Error('LaTeX 프로젝트는 기준 문서로 쓸 수 없어요.');
     case 'hwp':
     case 'hwpx': {
       const [{ loadHwpCore }, { HwpModel }] = await Promise.all([import('./hwp/core'), import('./hwp/model')]);

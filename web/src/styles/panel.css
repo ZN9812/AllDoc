@@ -147,6 +147,47 @@
   font-size: 12px;
 }
 
+/* LaTeX: 보낼 범위와 미리 정한 지시 */
+.tex-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scope label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.scope label:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--hot);
+}
+
+.scope input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 /* 서식 점검 */
 .crit {
   display: flex;

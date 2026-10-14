@@ -106,12 +106,71 @@ function rulesProposals(doc: DocSummary, rules: string): RawProposal[] {
   return out;
 }
 
+/** LaTeX 대화(데모): 본문 블록에만 오타 목록을 적용한다(주석·서문·수식은 건드리지 않는다). */
+function texSpelling(doc: DocSummary): RawProposal[] {
+  const body: DocSummary = { ...doc, paragraphs: doc.paragraphs.filter((p) => p.src?.role === 'body') };
+  return spelling(body).filter((p) => p.title !== '겹친 띄어쓰기 줄이기');
+}
+
+/**
+ * LaTeX 오류 고치기(데모): "Environment itemise undefined" 이면 itemise → itemize 로 고친다(종단 시험용).
+ * 패키지 파일이 없다는 오류는 제안 없이 설명만 한다(실제 AI 에게도 같은 원칙을 프롬프트로 알린다).
+ */
+function texFix(request: ProposeInput['request']): Omit<ProviderResult, 'usage'> {
+  const log = `${request.compile?.logExcerpt ?? ''}\n${(request.compile?.diagnostics ?? []).map((d) => d.message).join('\n')}`;
+  const missing = /File `([^']+)' not found/.exec(log);
+  if (missing) {
+    return { reply: `(데모) ${missing[1]} 파일이 컴파일 서버에 없어요. 패키지 이름을 확인하거나 그 파일을 프로젝트에 올려 주세요. 이 오류는 원고를 고쳐서 해결하지 않아요.`, proposals: [] };
+  }
+  if (!/Environment itemise undefined/.test(log)) {
+    return { reply: '(데모) 미리 정해 둔 오류("Environment itemise undefined")가 아니라서 고칠 곳을 제안하지 못했어요. 이 답변은 실제 AI가 아닌 예시예요.', proposals: [] };
+  }
+  const proposals: RawProposal[] = [];
+  for (const p of request.document.paragraphs) {
+    if (p.src?.role === 'verbatim') continue;
+    const count = p.text.split('{itemise}').length - 1;
+    if (count === 0) continue;
+    proposals.push({
+      category: 'wording',
+      title: 'itemise → itemize',
+      description: `LaTeX 의 목록 환경 이름은 itemize 예요(${p.src?.file ?? ''} ${p.src?.line ?? ''}행). 고친 뒤 다시 컴파일해서 확인하세요.`,
+      before: '\\begin{itemise}',
+      after: '\\begin{itemize}',
+      ops: Array.from({ length: count }, () => replaceOp(p.index, '{itemise}', '{itemize}')),
+    });
+  }
+  return {
+    reply:
+      proposals.length > 0
+        ? `(데모) 목록 환경 이름 오타(itemise)를 고치는 제안 ${proposals.length}개를 만들었어요. 적용한 뒤 다시 컴파일해 보세요. 이 답변은 실제 AI가 아닌 예시예요.`
+        : '(데모) 오류는 itemise 인데 보낸 원고에서 그 글을 찾지 못했어요.',
+    proposals,
+  };
+}
+
 export class MockProvider implements AiProvider {
   readonly id = 'mock';
   readonly demo = true;
 
   async propose({ request }: ProposeInput): Promise<ProviderResult> {
+    // 원장에는 모델 mock, 토큰 0 으로 남는다(실제 AI 비용이 없음).
+    return { ...this.answer(request), usage: { modelRequested: 'mock', modelServed: 'mock', fallback: false, parts: [] } };
+  }
+
+  private answer(request: ProposeInput['request']): Omit<ProviderResult, 'usage'> {
     const doc = request.document;
+
+    if (doc.kind === 'tex') {
+      if (request.mode === 'tex_fix') return texFix(request);
+      const proposals = texSpelling(doc);
+      return {
+        reply:
+          proposals.length > 0
+            ? `(데모) 본문 블록에서 맞춤법 ${proposals.length}가지를 찾았어요. 수식·주석·서문은 건드리지 않아요. 이 답변은 실제 AI가 아닌 예시예요.`
+            : '(데모) 미리 정해 둔 오탈자 목록에서는 본문에 고칠 곳을 찾지 못했어요. 이 답변은 실제 AI가 아닌 예시예요.',
+        proposals,
+      };
+    }
 
     if (request.mode === 'format_check') {
       if (!isFormatKind(doc.kind)) return { reply: '(데모) 이 형식은 서식을 바꿀 수 없어요.', proposals: [] };

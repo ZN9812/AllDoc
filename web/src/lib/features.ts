@@ -10,7 +10,7 @@ import { ACCEPT_ATTR } from '@alldoc/shared';
 export const DOCX_ENABLED = import.meta.env.VITE_DISABLE_DOCX !== '1';
 
 /** 화면에 보여 줄 지원 형식 목록 */
-export const SUPPORTED_FORMATS_TEXT = DOCX_ENABLED ? 'HWP · HWPX · DOCX · PDF · TXT · MD' : 'HWP · HWPX · PDF · TXT · MD';
+export const SUPPORTED_FORMATS_TEXT = DOCX_ENABLED ? 'HWP · HWPX · DOCX · PDF · TXT · MD · LaTeX(TEX·ZIP)' : 'HWP · HWPX · PDF · TXT · MD · LaTeX(TEX·ZIP)';
 
 /** 파일 선택 창에서 보여 줄 확장자 */
 export const ACCEPT = DOCX_ENABLED ? ACCEPT_ATTR : ACCEPT_ATTR.replace('.docx,', '');

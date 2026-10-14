@@ -10,6 +10,9 @@ describe('올린 파일 확인', () => {
     expect(checkUpload({ name: 'a.pdf', size: 10 })).toEqual({ ok: true, kind: 'pdf' });
     expect(checkUpload({ name: 'a.txt', size: 10 })).toEqual({ ok: true, kind: 'txt' });
     expect(checkUpload({ name: 'a.md', size: 10 })).toEqual({ ok: true, kind: 'md' });
+    expect(checkUpload({ name: '논문.tex', size: 10 })).toEqual({ ok: true, kind: 'tex' });
+    // .zip 은 형식이 아니라 LaTeX 프로젝트 가져오기 경로다
+    expect(checkUpload({ name: '논문.ZIP', size: 10 })).toEqual({ ok: true, kind: 'tex', zip: true });
   });
 
   it('지원하지 않는 형식은 이유를 한국어로 알려 준다', () => {

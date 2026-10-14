@@ -485,3 +485,25 @@
     padding: 10px 14px;
   }
 }
+
+/* 설정 > 계정 삭제 확인 */
+.danger-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+}
+
+.danger-box label:not(.radio-line) {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.danger-box input[type='text'] {
+  padding: 6px 8px;
+  max-width: 240px;
+}

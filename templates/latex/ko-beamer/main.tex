@@ -1,0 +1,50 @@
+% !TEX program = xelatex
+% SPDX-License-Identifier: MIT (templates/latex/LICENSE). 이 템플릿 틀만 MIT 이고, 여기에 쓴 글은 쓴 사람의 것입니다.
+% 한국어 발표 자료 템플릿: XeLaTeX + kotex + beamer.
+\documentclass[aspectratio=169]{beamer}
+\usetheme{default}
+\usepackage[hangul]{kotex}  % hangul: 날짜·장 제목 등을 한국어 방식으로
+\setmainhangulfont{Noto Sans CJK KR}[AutoFakeSlant=0.15]  % 한글 기울임꼴이 없어 기울여 만든다
+\setsanshangulfont{Noto Sans CJK KR}[AutoFakeSlant=0.15]
+\setmonohangulfont{Noto Sans Mono CJK KR}
+\usepackage{booktabs}
+\setbeamertemplate{navigation symbols}{}
+\AtBeginDocument{%
+  \renewcommand{\tablename}{표}%
+  \renewcommand{\figurename}{그림}%
+}
+
+\title{발표 제목}
+\author{홍길동}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\begin{frame}{차례}
+  \begin{enumerate}
+    \item 배경
+    \item 방법
+    \item 결과
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{결과}
+  \begin{table}
+    \centering
+    \caption{요약}
+    \begin{tabular}{lr}
+      \toprule
+      방법 & 점수 \\
+      \midrule
+      기존 & 81 \\
+      제안 & 88 \\
+      \bottomrule
+    \end{tabular}
+  \end{table}
+\end{frame}
+
+\end{document}

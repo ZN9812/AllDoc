@@ -1,7 +1,8 @@
+import type { DocKind } from '@alldoc/shared';
 import { selectPendingCount, useEditor } from './store';
 
 /** 휴대폰 아래 막대: 탭 창을 아래에서 올리는 버튼들 */
-export default function MobileBar() {
+export default function MobileBar({ kind }: { kind: DocKind }) {
   const pages = useEditor((s) => s.pages);
   const pending = useEditor(selectPendingCount);
   const openSheet = useEditor((s) => s.openSheet);
@@ -16,9 +17,15 @@ export default function MobileBar() {
       <button type="button" className="btn ghost sm" onClick={() => openSheet('chat')}>
         AI 대화
       </button>
-      <button type="button" className="btn ghost sm" onClick={() => openSheet('format')}>
-        서식 점검
-      </button>
+      {kind === 'tex' ? (
+        <button type="button" className="btn ghost sm" onClick={() => openSheet('compile')}>
+          컴파일 결과
+        </button>
+      ) : (
+        <button type="button" className="btn ghost sm" onClick={() => openSheet('format')}>
+          서식 점검
+        </button>
+      )}
       <button type="button" className="btn ghost sm" onClick={() => openSheet('changes')}>
         변경 내역 {pending > 0 && <span className="badge">{pending}</span>}
       </button>

@@ -67,12 +67,13 @@ export default function EditorPage({ id }: { id: string }) {
     const engine = useEditor.getState().engine;
     if (!engine) return chain.current;
     dirty.current = false;
-    const pending = engine.getBlob();
+    // 엔진이 스스로 저장할 수 있으면(LaTeX: 바뀐 파일만) 그것을 쓰고, 아니면 파일 전체를 받아 작업본으로 저장한다.
+    const pending = engine.persist ? engine.persist() : engine.getBlob().then((blob) => saveWorking(id, blob));
     pending.catch(() => undefined);
     const run = chain.current.then(async () => {
       setSave({ kind: 'saving' });
       try {
-        const meta = await saveWorking(id, await pending);
+        const meta = await pending;
         setSave({ kind: 'saved', at: meta.updatedAt });
         void engine.markSaved?.().catch(() => undefined);
       } catch (e) {
@@ -145,7 +146,7 @@ export default function EditorPage({ id }: { id: string }) {
 
   const { doc } = load;
   const Engine = engineFor(doc.kind);
-  const bare = doc.kind === 'hwp' || doc.kind === 'hwpx' || doc.kind === 'docx';
+  const bare = doc.kind === 'hwp' || doc.kind === 'hwpx' || doc.kind === 'docx' || doc.kind === 'tex';
 
   return (
     <div className="shell">
@@ -167,7 +168,7 @@ export default function EditorPage({ id }: { id: string }) {
           </main>
           <SidePanel kind={doc.kind} />
         </div>
-        <MobileBar />
+        <MobileBar kind={doc.kind} />
       </div>
     </div>
   );

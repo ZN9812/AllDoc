@@ -34,6 +34,16 @@ export interface HighlightState {
   focus: HighlightTarget[];
 }
 
+/** AI 에 보낼 범위(LaTeX 프로젝트만 쓴다). 다른 문서는 늘 문서 전체를 보낸다. */
+export type TexScope = 'file' | 'selection' | 'project';
+
+export interface SummarizeOptions {
+  /** 지금 파일(기본) · 선택 영역 · 프로젝트 전체 */
+  scope?: TexScope;
+  /** 이 파일들과 주 파일만 보낸다(오류 고치기: 진단이 가리키는 파일). scope 보다 앞선다. */
+  files?: string[];
+}
+
 /** 편집기 연결부(엔진)가 화면 쪽에 내주는 손잡이 */
 export interface EngineHandle {
   readonly kind: DocKind;
@@ -43,8 +53,8 @@ export interface EngineHandle {
   getBlob(): Promise<Blob>;
   /** 내려받기 선택지(원본 형식 + 다른 형식) */
   exportOptions(): ExportOption[];
-  /** AI 와 서식 점검에 넘길 문서 요약 */
-  summarize(): Promise<DocSummary>;
+  /** AI 와 서식 점검에 넘길 문서 요약. opts 는 LaTeX 프로젝트만 본다. */
+  summarize(opts?: SummarizeOptions): Promise<DocSummary>;
   /** 변경을 한 묶음으로 적용한다. 하나라도 실패하면 모두 되돌리고 실패를 돌려준다. */
   apply(ops: Op[]): Promise<ApplyResult>;
   setHighlights(state: HighlightState): void;
@@ -52,6 +62,11 @@ export interface EngineHandle {
   reveal?(target: HighlightTarget): void;
   /** 방금 내려받은 저장본을 이 브라우저에 보관했음을 편집기에 알린다(편집기 안의 "저장 안 됨" 표시와 복구 임시본을 정리하는 데 쓴다). */
   markSaved?(): Promise<void>;
+  /**
+   * 자동 저장. 있으면 화면(EditorPage)이 getBlob + saveWorking 대신 이것을 부른다(LaTeX 프로젝트는 바뀐 파일만 저장한다).
+   * 부르는 즉시 저장할 내용을 잡아 두어야 한다(엔진이 닫힌 뒤에도 저장되도록).
+   */
+  persist?(): Promise<{ updatedAt: number }>;
 }
 
 export interface LoadedDoc {

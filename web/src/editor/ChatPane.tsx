@@ -1,12 +1,28 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { DocKind } from '@alldoc/shared';
+import type { TexScope } from '../engines/types';
 import { askAi } from '../ai/actions';
 import { loginUrl } from '../ai/client';
 import { useLocation, Link } from 'react-router-dom';
 import { aiAvailability, useAuth } from '../state/auth';
+import { useTerms } from '../state/terms';
 import { useSettings } from '../state/settings';
 import { COVERAGE_NOTE } from './coverage';
 import { useEditor } from './store';
+
+/** LaTeX 원고에 미리 정한 지시(모드를 따로 두지 않고 대화로 보낸다, docs/LATEX.md) */
+const TEX_PRESETS: Array<{ label: string; instruction: string }> = [
+  { label: '학술 문체로 다듬기', instruction: '본문 문장을 한국어 학술 문체(평서형 "-다")로 다듬어 줘.' },
+  { label: '영어 문장 다듬기', instruction: '본문의 영어 문장을 자연스러운 학술 영어로 다듬어 줘.' },
+  { label: '맞춤법', instruction: '본문의 맞춤법과 띄어쓰기를 고쳐 줘.' },
+  { label: '용어 통일', instruction: '같은 개념을 가리키는 용어가 섞여 있으면 하나로 통일해 줘.' },
+];
+
+const TEX_SCOPES: Array<{ id: TexScope; label: string }> = [
+  { id: 'file', label: '지금 파일' },
+  { id: 'selection', label: '선택 영역' },
+  { id: 'project', label: '프로젝트 전체' },
+];
 
 export default function ChatPane({ kind }: { kind: DocKind }) {
   const me = useAuth((s) => s.me);
@@ -15,6 +31,8 @@ export default function ChatPane({ kind }: { kind: DocKind }) {
   const busy = useEditor((s) => s.busy);
   const engine = useEditor((s) => s.engine);
   const setTab = useEditor((s) => s.setTab);
+  const texScope = useEditor((s) => s.texScope);
+  const setTexScope = useEditor((s) => s.setTexScope);
   const [text, setText] = useState('');
   const box = useRef<HTMLDivElement>(null);
   const loc = useLocation();
@@ -52,6 +70,11 @@ export default function ChatPane({ kind }: { kind: DocKind }) {
               </a>
             </>
           )}
+          {avail.reason === 'agreement' && (
+            <button type="button" className="btn primary" onClick={() => useTerms.getState().show()}>
+              약관 보고 동의하기
+            </button>
+          )}
           {avail.reason === 'off' && (
             <Link className="btn primary" to="/settings">
               설정에서 켜기
@@ -74,7 +97,9 @@ export default function ChatPane({ kind }: { kind: DocKind }) {
     <div className="pane" id="pane-chat" role="tabpanel" ref={box}>
       {me?.ai.demo && <p className="demo-note">데모 AI가 연결되어 있어요. 실제 AI가 아니라 미리 정해 둔 예시 제안만 돌려줍니다.</p>}
       <div className="thread" aria-live="polite">
-        {thread.length === 0 && <div className="bub">문서를 어떻게 고칠까요? 예: "맞춤법을 확인해 줘", "공문서 말투로 바꿔 줘"</div>}
+        {thread.length === 0 && (
+          <div className="bub">{kind === 'tex' ? '원고를 어떻게 고칠까요? 예: "맞춤법을 확인해 줘", "이 절을 학술 문체로 다듬어 줘"' : '문서를 어떻게 고칠까요? 예: "맞춤법을 확인해 줘", "공문서 말투로 바꿔 줘"'}</div>
+        )}
         {thread.map((m) => (
           <div key={m.id} className={`bub${m.role === 'user' ? ' me' : ''}${m.tone === 'error' ? ' err' : ''}${m.tone === 'demo' ? ' demo' : ''}`}>
             {m.content}
@@ -90,6 +115,25 @@ export default function ChatPane({ kind }: { kind: DocKind }) {
         ))}
         {busy && <div className="bub">AI가 문서를 살펴보는 중이에요…</div>}
       </div>
+      {kind === 'tex' && (
+        <div className="tex-ask">
+          <div className="scope" role="radiogroup" aria-label="AI에 보낼 범위">
+            {TEX_SCOPES.map((s) => (
+              <label key={s.id}>
+                <input type="radio" name="tex-scope" value={s.id} checked={texScope === s.id} onChange={() => setTexScope(s.id)} />
+                {s.label}
+              </label>
+            ))}
+          </div>
+          <div className="presets">
+            {TEX_PRESETS.map((p) => (
+              <button key={p.label} type="button" className="btn ghost sm" disabled={busy || !engine} onClick={() => void askAi(p.instruction)}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <form className="ask" onSubmit={onSubmit}>
         <input
           type="text"

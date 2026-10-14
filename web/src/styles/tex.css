@@ -1,0 +1,383 @@
+/* ---- LaTeX 프로젝트: 파일 목록 | 원고 | PDF 미리보기 ---- */
+.tex-engine {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(150px, 200px) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  background: var(--canvas);
+}
+
+.tex-switch {
+  display: none;
+}
+
+.tex-files {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  background: var(--chrome);
+  border-right: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.tex-files-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tex-files-h > span {
+  flex: 1 0 100%;
+}
+
+.tex-files ul {
+  margin: 0;
+  padding: 0 0 12px;
+  list-style: none;
+}
+
+.tex-files li.on {
+  background: var(--hot);
+}
+
+.tex-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  text-align: left;
+}
+
+.tex-file .nm {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tex-file[aria-current='true'] {
+  font-weight: 700;
+}
+
+.chip.bad,
+.tnote.bad {
+  color: var(--danger);
+}
+
+.tex-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 0 6px 6px;
+}
+
+.tex-name {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px;
+}
+
+.tex-name input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.tex-source {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border-right: 1px solid var(--line);
+}
+
+.tex-cm {
+  flex: 1;
+  min-height: 0;
+}
+
+.tex-cm[hidden] {
+  display: none;
+}
+
+.tex-cm .cm-editor {
+  height: 100%;
+}
+
+.tex-pdf {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tex-pdf-h {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--chrome);
+}
+
+.tex-pdf-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.tex-pdf-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+.tex-pdf-pages canvas {
+  flex: none;
+  background: #fff;
+  box-shadow: 0 1px 6px var(--shadow);
+}
+
+.tools .tsel select {
+  height: 30px;
+  margin: 0 2px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--chrome);
+  color: var(--ink);
+  font-size: 13px;
+  max-width: 220px;
+}
+
+.tb.primary-tb {
+  background: var(--accent);
+  color: var(--on-accent);
+  padding: 0 14px;
+}
+
+.tb.primary-tb:hover {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+/* 컴파일 탭 */
+.compile-run {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.compile-run .mut,
+.pane .mut {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.compile-sum {
+  margin: 0;
+  font-size: 13px;
+}
+
+.compile-err {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.diag {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.diag button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--chrome);
+  color: var(--ink);
+  text-align: left;
+  font-size: 12px;
+}
+
+.diag button:not(:disabled):hover {
+  background: var(--fill);
+}
+
+.diag button:disabled {
+  cursor: default;
+}
+
+.diag .sev {
+  grid-row: span 2;
+  font-weight: 700;
+}
+
+.diag .error .sev {
+  color: var(--danger);
+}
+
+.diag .warning .sev {
+  color: var(--warn);
+}
+
+.diag .info .sev {
+  color: var(--muted);
+}
+
+.diag .where {
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
+}
+
+.diag .msg {
+  word-break: break-word;
+}
+
+.rawlog summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rawlog pre {
+  max-height: 320px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--fill);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 중간 폭: 파일 목록을 좁힌다 */
+@media (max-width: 1100px) {
+  .tex-engine {
+    grid-template-columns: 140px minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+/* 휴대폰: "파일 / 원고 / PDF" 중 하나만 보인다 */
+@media (max-width: 700px) {
+  .tex-engine {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .tex-switch {
+    flex: none;
+    display: flex;
+    border-bottom: 1px solid var(--line);
+    background: var(--chrome);
+  }
+
+  .tex-switch button {
+    flex: 1;
+    height: 44px;
+    border: 0;
+    background: none;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .tex-switch button[aria-selected='true'] {
+    color: var(--ink);
+    font-weight: 700;
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+
+  .tex-files,
+  .tex-source,
+  .tex-pdf {
+    flex: 1;
+    min-height: 0;
+    border-right: 0;
+  }
+
+  .tex-engine[data-pane='files'] .tex-source,
+  .tex-engine[data-pane='files'] .tex-pdf,
+  .tex-engine[data-pane='source'] .tex-files,
+  .tex-engine[data-pane='source'] .tex-pdf,
+  .tex-engine[data-pane='pdf'] .tex-files,
+  .tex-engine[data-pane='pdf'] .tex-source {
+    display: none;
+  }
+
+  .tex-file {
+    min-height: 44px;
+  }
+}
+
+/* 홈: LaTeX 새 프로젝트 */
+.tex-new {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tex-new ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tex-new button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--chrome);
+  color: var(--ink);
+  text-align: left;
+  font-size: 13px;
+}
+
+.tex-new button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.tex-new button span {
+  color: var(--muted);
+  font-size: 12px;
+}

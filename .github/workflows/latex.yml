@@ -1,0 +1,96 @@
+name: LaTeX
+
+# 컴파일 일꾼 이미지를 만들어 그 안에서 탈출 시험(compiler/test/escape)을 돌리고, 그 일꾼으로 진짜 TeX 종단 시험(e2e/tex-real.spec.ts)을 돌린다.
+# 이미지가 커서 관련 파일이 바뀔 때와 매일 밤에만 돈다.
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths:
+      - "compiler/**"
+      - "shared/src/tex/**"
+      - "server/src/tex/**"
+      - "web/src/engines/TexEngine.tsx"
+      - "web/src/engines/tex/**"
+      - "web/src/editor/tex/**"
+      - "templates/latex/**"
+      - "e2e/tex-real.spec.ts"
+      - ".github/workflows/latex.yml"
+  pull_request:
+    paths:
+      - "compiler/**"
+      - "shared/src/tex/**"
+      - "server/src/tex/**"
+      - "templates/latex/**"
+  schedule:
+    - cron: "17 18 * * *"
+  workflow_dispatch:
+
+env:
+  RHWP_STUDIO_STRICT: "1"
+
+jobs:
+  latex:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      COMPILER_SECRET: ci-compiler-secret-ci-compiler-secret-0123456789
+    steps:
+      - uses: actions/checkout@v4
+      - name: 러너 디스크(빌드 전)
+        run: df -h /
+      - name: 컴파일 일꾼 이미지 만들기
+        run: docker build -f compiler/Dockerfile -t alldoc-compiler:ci .
+      - name: 이미지 크기와 러너 디스크(빌드 뒤)
+        run: |
+          docker image ls alldoc-compiler:ci
+          df -h /
+      # Ubuntu 23.10 이상은 AppArmor 로 권한 없는 사용자 이름공간을 막는다. 운영 서버도 같은 설정이 필요하다(docs/DEPLOY.md).
+      - name: 권한 없는 사용자 이름공간 허용
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: 탈출 시험(운영과 같은 컨테이너 설정)
+        run: |
+          docker run --rm --network none --read-only \
+            --tmpfs /work:size=1g,mode=1777 --tmpfs /tmp:size=256m,mode=1777 \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --security-opt seccomp=compiler/seccomp.json --security-opt apparmor=unconfined \
+            --pids-limit 512 --memory 4g --cpus 2 \
+            -e REQUIRE_TEXLIVE=1 -e WORK_DIR=/work \
+            alldoc-compiler:ci node dist/escape.js
+      - name: 일꾼 띄우기
+        run: |
+          docker run -d --name compiler -p 127.0.0.1:8790:8790 --read-only \
+            --tmpfs /work:size=1g,mode=1777 --tmpfs /tmp:size=256m,mode=1777 \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --security-opt seccomp=compiler/seccomp.json --security-opt apparmor=unconfined \
+            --pids-limit 512 --memory 4g --cpus 2 \
+            -e COMPILER_SECRET alldoc-compiler:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8790/health; then echo; exit 0; fi
+            sleep 1
+          done
+          docker logs compiler
+          exit 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: pdftotext 설치
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
+      - name: 진짜 TeX 종단 시험
+        run: npx playwright test e2e/tex-real.spec.ts --project=tex-real
+        env:
+          REQUIRE_TEXLIVE: "1"
+          COMPILER_URLS: http://127.0.0.1:8790
+      - if: always()
+        run: docker logs compiler || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: latex-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

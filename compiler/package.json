@@ -1,0 +1,22 @@
+{
+  "name": "@alldoc/compiler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LaTeX 컴파일 일꾼(별도 이미지). 본 서버가 내부망으로 보낸 작업을 bubblewrap 안에서 컴파일한다",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "test:escape": "node scripts/build.mjs && node dist/escape.js"
+  },
+  "dependencies": {
+    "@alldoc/shared": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "esbuild": "^0.28.2"
+  }
+}

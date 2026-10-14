@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { AUTH_MODES, type AiMode, type AuthMode } from '@alldoc/shared';
+import { AI_TASKS, AUTH_MODES, DEFAULT_COMPILE_LIMITS, MAX_DOC_CHARS, PlanSchema, type AiTask, type AuthMode, type Plan } from '@alldoc/shared';
 import { buildSystemPrompt } from './ai/prompt';
 
 export class ConfigError extends Error {
@@ -21,7 +21,7 @@ export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 export const DEFAULT_MODEL = 'claude-opus-5-5';
 
-/** 작업 하나(AI 대화, 서식 점검)를 처리할 AI 연결의 최종 설정 */
+/** 작업 하나(AI 대화, 서식 점검, LaTeX 대화, LaTeX 오류 고치기)를 처리할 AI 연결의 최종 설정 */
 export interface AiTaskSettings {
   provider: ProviderId;
   model: string;
@@ -33,7 +33,12 @@ export interface AiTaskSettings {
   systemPrompt: string;
   /** 모델이 정책상 답을 거절하면 서버가 대체 모델로 한 번 더 시도하게 하는 Anthropic 옵션 */
   fallbacks: boolean;
+  /** 프롬프트 캐싱 범위: off(안 함) · system(시스템 프롬프트, 기본) · document(시스템 프롬프트 + 문서) */
+  promptCache: PromptCacheMode;
 }
+
+export const PROMPT_CACHE_MODES = ['off', 'system', 'document'] as const;
+export type PromptCacheMode = (typeof PROMPT_CACHE_MODES)[number];
 
 export interface Config {
   port: number;
@@ -43,13 +48,47 @@ export interface Config {
   sessionSecret: string;
   authMode: AuthMode;
   google: { clientId: string; clientSecret: string } | null;
-  dailyLimit: number;
   timezone: string;
   dataDir: string;
+  /** 하루 한 번 스냅숏을 둘 폴더(기본 DATA_DIR/backups)와 남길 개수(0 이면 백업하지 않음) */
+  backup: { dir: string; keep: number };
   webDist: string;
   allowedOrigins: string[];
-  ai: Record<AiMode, AiTaskSettings>;
+  /** 작업별 AI 설정(chat·format_check·tex_chat·tex_fix) */
+  ai: Record<AiTask, AiTaskSettings>;
+  /** 요금제 목록과 기본 요금제. PLANS_CONFIG_PATH 가 없으면 DAILY_AI_LIMIT 로 만든 free 하나 */
+  plans: { defaultPlanId: string; list: Plan[] };
+  /** 전체 하루 AI 원가 상한(마이크로달러). 넘으면 그날은 AI 를 멈춘다(503). null 이면 없음 */
+  aiDailyBudgetMicroUsd: number | null;
+  /** 동의를 받아야 하는 약관 판과 전문 주소. null 이면 동의를 받지 않는다(자체 설치 기본) */
+  terms: { version: string; termsUrl: string; privacyUrl: string } | null;
+  /** LaTeX 컴파일. null 이면 끔(COMPILER=off, 기본) */
+  compiler: CompilerSettings | null;
 }
+
+export const COMPILER_MODES = ['off', 'mock', 'http'] as const;
+
+export interface CompilerSettings {
+  mode: 'mock' | 'http';
+  /** http: 일꾼 주소 목록(COMPILER_URLS, 쉼표로 구분) */
+  urls: string[];
+  /** http: 요청 서명 비밀값(COMPILER_SECRET, 32자 이상) */
+  secret: string;
+  /** 동시에 돌리는 컴파일 수(서버 전체) */
+  concurrency: number;
+  /** 기다릴 수 있는 컴파일 수(서버 전체). 넘으면 503 busy */
+  queue: number;
+  /** 올린 파일을 마지막 사용 뒤 며칠 두는지 */
+  retentionDays: number;
+}
+
+export const PlansFileSchema = z
+  .object({
+    /** 로그인한 사용자가 기본으로 받는 요금제 id */
+    default: z.string(),
+    plans: z.array(PlanSchema).min(1),
+  })
+  .strict();
 
 const blank = (v: string | undefined) => (v === undefined || v.trim() === '' ? undefined : v.trim());
 
@@ -66,8 +105,21 @@ const EnvSchema = z.object({
   AI_PROVIDER: z.enum(PROVIDER_IDS).default('anthropic'),
   ANTHROPIC_API_KEY: z.string().optional(),
   AI_CONFIG_PATH: z.string().optional(),
+  PLANS_CONFIG_PATH: z.string().optional(),
+  AI_DAILY_BUDGET_USD: z.coerce.number().positive().optional(),
+  TERMS_VERSION: z.string().max(40).optional(),
+  TERMS_URL: z.url().optional(),
+  PRIVACY_URL: z.url().optional(),
   DATA_DIR: z.string().default('./data'),
+  BACKUP_DIR: z.string().optional(),
+  BACKUP_KEEP: z.coerce.number().int().min(0).max(3650).default(14),
   WEB_DIST: z.string().optional(),
+  COMPILER: z.enum(COMPILER_MODES).default('off'),
+  COMPILER_URLS: z.string().optional(),
+  COMPILER_SECRET: z.string().optional(),
+  COMPILER_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(2),
+  COMPILER_QUEUE: z.coerce.number().int().min(0).max(1000).default(10),
+  TEX_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(7),
   ALLOWED_ORIGINS: z.string().optional(),
 });
 
@@ -87,13 +139,17 @@ const TaskFileSchema = z
     /** 기본 시스템 프롬프트 뒤에 규칙을 덧붙인다 */
     systemPromptAppend: z.string().min(1).optional(),
     fallbacks: z.enum(['default', 'off']).optional(),
+    promptCache: z.enum(PROMPT_CACHE_MODES).optional(),
   })
   .strict();
 
 export const AiConfigFileSchema = z
   .object({
     default: TaskFileSchema.optional(),
-    tasks: z.object({ chat: TaskFileSchema.optional(), format_check: TaskFileSchema.optional() }).strict().optional(),
+    tasks: z
+      .object({ chat: TaskFileSchema.optional(), format_check: TaskFileSchema.optional(), tex_chat: TaskFileSchema.optional(), tex_fix: TaskFileSchema.optional() })
+      .strict()
+      .optional(),
   })
   .strict();
 export type AiConfigFile = z.infer<typeof AiConfigFileSchema>;
@@ -182,8 +238,8 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
     }
   }
 
-  const ai = {} as Record<AiMode, AiTaskSettings>;
-  for (const mode of ['chat', 'format_check'] as const) {
+  const ai = {} as Record<AiTask, AiTaskSettings>;
+  for (const mode of AI_TASKS) {
     const merged = { ...file.default, ...file.tasks?.[mode] };
     const label = `AI 설정(${mode})`;
     if (merged.systemPrompt && merged.systemPromptFile) problems.push(`${label}: systemPrompt 와 systemPromptFile 은 함께 쓸 수 없어요.`);
@@ -213,6 +269,61 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
       apiKey,
       systemPrompt: base,
       fallbacks: (merged.fallbacks ?? 'default') === 'default',
+      promptCache: merged.promptCache ?? 'system',
+    };
+  }
+
+  if (env.TERMS_VERSION && (!env.TERMS_URL || !env.PRIVACY_URL)) {
+    problems.push('TERMS_VERSION 을 쓰면 동의 화면에 보여 줄 TERMS_URL(이용약관)과 PRIVACY_URL(개인정보처리방침)도 넣어 주세요.');
+  }
+
+  // 요금제 파일
+  let plans: Config['plans'] = {
+    defaultPlanId: 'free',
+    list: [{ id: 'free', name: '무료', limits: { aiRequestsPerDay: env.DAILY_AI_LIMIT, aiRequestsPerMonth: null, aiMaxDocChars: MAX_DOC_CHARS, aiCostCapMicroUsdPerMonth: null, ...DEFAULT_COMPILE_LIMITS } }],
+  };
+  if (env.PLANS_CONFIG_PATH) {
+    try {
+      const r = PlansFileSchema.safeParse(JSON.parse(deps.readFile(resolve(env.PLANS_CONFIG_PATH))));
+      if (!r.success) problems.push(...issues(`요금제 파일(${env.PLANS_CONFIG_PATH})`, r.error));
+      else {
+        const ids = r.data.plans.map((p) => p.id);
+        if (new Set(ids).size !== ids.length) problems.push(`요금제 파일(${env.PLANS_CONFIG_PATH}): 요금제 id 가 겹쳐요.`);
+        if (!ids.includes(r.data.default)) problems.push(`요금제 파일(${env.PLANS_CONFIG_PATH}): 기본 요금제 "${r.data.default}" 가 plans 에 없어요.`);
+        plans = { defaultPlanId: r.data.default, list: r.data.plans };
+      }
+    } catch (e) {
+      problems.push(`요금제 파일(${env.PLANS_CONFIG_PATH})을 읽지 못했어요: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // LaTeX 컴파일
+  let compiler: Config['compiler'] = null;
+  if (env.COMPILER !== 'off') {
+    const urls = (env.COMPILER_URLS ?? '')
+      .split(',')
+      .map((u) => u.trim())
+      .filter(Boolean);
+    if (env.COMPILER === 'http') {
+      if (urls.length === 0) problems.push('COMPILER=http 에는 컴파일 일꾼 주소 COMPILER_URLS 가 필요해요. 예: http://compiler:8790');
+      for (const u of urls) {
+        try {
+          new URL(u);
+        } catch {
+          problems.push(`COMPILER_URLS: "${u}" 은(는) 올바른 주소가 아니에요.`);
+        }
+      }
+      if (!env.COMPILER_SECRET || env.COMPILER_SECRET.length < 32) problems.push('COMPILER=http 에는 32자 이상의 COMPILER_SECRET 이 필요해요(일꾼과 같은 값).');
+    } else if (production) {
+      console.warn('경고: COMPILER=mock 은 실제 TeX 가 아닌 데모 컴파일러예요.');
+    }
+    compiler = {
+      mode: env.COMPILER,
+      urls,
+      secret: env.COMPILER_SECRET ?? '',
+      concurrency: env.COMPILER_CONCURRENCY,
+      queue: env.COMPILER_QUEUE,
+      retentionDays: env.TEX_RETENTION_DAYS,
     };
   }
 
@@ -238,11 +349,15 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
     sessionSecret: sessionSecret ?? '',
     authMode: env.AUTH_MODE,
     google,
-    dailyLimit: env.DAILY_AI_LIMIT,
     timezone: env.APP_TIMEZONE,
     dataDir: resolve(env.DATA_DIR),
+    backup: { dir: resolve(env.BACKUP_DIR ?? resolve(env.DATA_DIR, 'backups')), keep: env.BACKUP_KEEP },
     webDist: resolve(env.WEB_DIST ?? resolve(deps.moduleDir, '../../web/dist')),
     allowedOrigins: [...origins],
     ai,
+    plans,
+    aiDailyBudgetMicroUsd: env.AI_DAILY_BUDGET_USD ? Math.round(env.AI_DAILY_BUDGET_USD * 1_000_000) : null,
+    terms: env.TERMS_VERSION && env.TERMS_URL && env.PRIVACY_URL ? { version: env.TERMS_VERSION, termsUrl: env.TERMS_URL, privacyUrl: env.PRIVACY_URL } : null,
+    compiler,
   };
 }
