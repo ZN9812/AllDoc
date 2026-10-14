@@ -115,6 +115,25 @@ describe('프롬프트 만들기', () => {
     expect(msgs.at(-1)?.content).toContain('<document');
   });
 
+  it('문서 캐시: 문서를 맨 앞에 한 번만 두고, 그 뒤에 대화 기록과 이번 지시를 붙인다', () => {
+    const req: AiRequest = {
+      ...base,
+      history: [
+        { role: 'user', content: '전에 한 말' },
+        { role: 'assistant', content: '전에 한 답' },
+      ],
+    };
+    const msgs = buildMessages(req, { cacheDocument: true });
+    expect(msgs.map((m) => m.role)).toEqual(['user', 'user', 'assistant', 'user']);
+    expect(msgs[0]?.content).toEqual([{ type: 'text', text: renderDocument(base.document), cache_control: { type: 'ephemeral' } }]);
+    expect(msgs[1]?.content).toBe('전에 한 말');
+    expect(msgs.at(-1)?.content).toContain('<instruction>"맞춤법을 확인해 줘"</instruction>');
+    expect(JSON.stringify(msgs).split('<document').length - 1).toBe(1);
+    // 같은 문서에 다른 지시를 하면 맨 앞(캐시되는 부분)은 같다
+    const again = buildMessages({ ...req, instruction: '공문서 말투로' }, { cacheDocument: true });
+    expect(again[0]).toEqual(msgs[0]);
+  });
+
   it('작업별 기본 시스템 프롬프트가 다르다', () => {
     expect(buildSystemPrompt('chat')).toContain('대화');
     expect(buildSystemPrompt('format_check')).toContain('서식 점검');

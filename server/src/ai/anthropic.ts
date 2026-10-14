@@ -107,8 +107,12 @@ export class AnthropicProvider implements AiProvider {
     const params = {
       model: this.settings.model,
       max_tokens: this.settings.maxTokens,
-      system: this.settings.systemPrompt,
-      messages: buildMessages(request),
+      // 프롬프트 캐싱: 시스템 프롬프트는 모든 사용자에게 같아서 캐시에서 읽을 수 있다. 너무 짧으면(모델별 최소 길이 미만) 조용히 캐시되지 않는다.
+      system:
+        this.settings.promptCache === 'off'
+          ? this.settings.systemPrompt
+          : [{ type: 'text', text: this.settings.systemPrompt, cache_control: { type: 'ephemeral' } }],
+      messages: buildMessages(request, { cacheDocument: this.settings.promptCache === 'document' }),
       // 구조화된 출력: 응답이 AiOutputSchema 모양의 JSON 으로 보장된다. effort 는 기본값에 기대지 않고 명시한다.
       output_config: { effort: this.settings.effort, format: zodOutputFormat(AiOutputSchema) },
     };

@@ -79,8 +79,8 @@ export function renderDocument(doc: DocSummary): string {
   return [head, ...lines, '</document>'].join('\n');
 }
 
-/** 이번 요청의 사용자 쪽 메시지(지시 + 규칙/기준 + 문서) */
-export function buildUserContent(req: AiRequest): string {
+/** 이번 요청의 사용자 쪽 메시지(지시 + 규칙/기준 + 문서). withDocument=false 면 문서를 빼고 만든다(문서를 앞에 따로 둘 때). */
+export function buildUserContent(req: AiRequest, withDocument = true): string {
   const parts: string[] = [];
   if (req.instruction.trim()) parts.push(`<instruction>${quote(req.instruction.trim())}</instruction>`);
   if (req.criteria === 'rules' && req.rulesText?.trim()) parts.push(`<rules>${quote(req.rulesText.trim())}</rules>`);
@@ -89,13 +89,28 @@ export function buildUserContent(req: AiRequest): string {
     parts.push(`<reference source=${quote(req.reference.source)}>${quote(JSON.stringify(groups))}</reference>`);
   }
   if (req.mode === 'format_check' && parts.length === 0) parts.push('<instruction>"문서의 서식을 점검해 주세요."</instruction>');
-  parts.push(renderDocument(req.document));
+  if (withDocument) parts.push(renderDocument(req.document));
   return parts.join('\n');
 }
 
-/** 대화 기록(이번 요청 제외)과 이번 요청을 모델에 보낼 메시지 목록으로 만든다. 첫 메시지는 항상 사용자여야 한다. */
-export function buildMessages(req: AiRequest): Array<{ role: 'user' | 'assistant'; content: string }> {
+export interface TextBlock {
+  type: 'text';
+  text: string;
+  cache_control?: { type: 'ephemeral' };
+}
+export type PromptMessage = { role: 'user' | 'assistant'; content: string | TextBlock[] };
+
+/**
+ * 대화 기록(이번 요청 제외)과 이번 요청을 모델에 보낼 메시지 목록으로 만든다. 첫 메시지는 항상 사용자여야 한다.
+ * cacheDocument 이면 문서를 맨 앞 사용자 메시지에 따로 두고 캐시 표시를 붙인다. 캐시는 앞부분이 같아야 맞으므로,
+ * 문서가 그대로인 채 여러 번 묻는 동안 문서 토큰을 캐시에서 읽는다(제안을 적용해 문서가 바뀌면 다시 쓴다).
+ * 기록이 사용자 말로 시작하면 사용자 메시지가 이어지는데, API 가 하나로 합친다.
+ */
+export function buildMessages(req: AiRequest, opts: { cacheDocument?: boolean } = {}): PromptMessage[] {
   const history = [...(req.history ?? [])];
   while (history[0]?.role === 'assistant') history.shift();
-  return [...history.map((m) => ({ role: m.role, content: m.content })), { role: 'user', content: buildUserContent(req) }];
+  const past = history.map((m) => ({ role: m.role, content: m.content }));
+  if (!opts.cacheDocument) return [...past, { role: 'user', content: buildUserContent(req) }];
+  const doc: PromptMessage = { role: 'user', content: [{ type: 'text', text: renderDocument(req.document), cache_control: { type: 'ephemeral' } }] };
+  return [doc, ...past, { role: 'user', content: `${buildUserContent(req, false)}\n(고칠 문서는 대화 맨 앞에 있습니다.)`.trimStart() }];
 }

@@ -114,6 +114,14 @@ describe('AI 설정 파일', () => {
     expect(testConfig(env, file({ default: { fallbacks: 'off' } })).ai.chat.fallbacks).toBe(false);
   });
 
+  it('프롬프트 캐싱은 기본으로 시스템 프롬프트만, 작업마다 바꿀 수 있다', () => {
+    const c = testConfig(env, file({ tasks: { chat: { promptCache: 'document' }, format_check: { promptCache: 'off' } } }));
+    expect(testConfig(env, file({})).ai.chat.promptCache).toBe('system');
+    expect(c.ai.chat.promptCache).toBe('document');
+    expect(c.ai.format_check.promptCache).toBe('off');
+    expect(problems(() => testConfig(env, file({ default: { promptCache: 'all' } }))).length).toBeGreaterThan(0);
+  });
+
   it('모르는 항목·잘못된 값·충돌은 시작할 때 알려 준다', () => {
     expect(problems(() => testConfig(env, file({ default: { modle: 'x' } }))).length).toBeGreaterThan(0);
     expect(problems(() => testConfig(env, file({ default: { effort: 'extreme' } }))).length).toBeGreaterThan(0);

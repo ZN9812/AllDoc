@@ -46,7 +46,8 @@ describe('Claude 연결부', () => {
       output_config: { effort: 'medium' },
     });
     expect(params.output_config.format).toMatchObject({ type: 'json_schema' });
-    expect(params.system).toContain('편집 도우미');
+    // 시스템 프롬프트는 캐시 표시를 붙여 보낸다(기본 promptCache=system). 문서는 마지막 사용자 메시지에 그대로 있다.
+    expect(params.system).toEqual([{ type: 'text', text: expect.stringContaining('편집 도우미'), cache_control: { type: 'ephemeral' } }]);
     expect(params.messages.at(-1)).toMatchObject({ role: 'user' });
     expect(params.messages.at(-1).content).toContain('<document kind="docx">');
     expect(params.tool_choice).toBeUndefined();
@@ -56,7 +57,25 @@ describe('Claude 연결부', () => {
     const { client, beta } = fakeClient();
     const s = settings({}, { tasks: { chat: { model: 'my-tuned', effort: 'high', maxTokens: 4000, systemPrompt: '내 지시문' } } });
     await new AnthropicProvider(s, client).propose({ request });
-    expect(beta.mock.calls[0]?.[0]).toMatchObject({ model: 'my-tuned', max_tokens: 4000, system: '내 지시문', output_config: { effort: 'high' } });
+    expect(beta.mock.calls[0]?.[0]).toMatchObject({ model: 'my-tuned', max_tokens: 4000, system: [{ text: '내 지시문' }], output_config: { effort: 'high' } });
+  });
+
+  it('promptCache=off 면 캐시 표시 없이 문자열로 보낸다', async () => {
+    const { client, beta } = fakeClient();
+    await new AnthropicProvider(settings({}, { default: { promptCache: 'off' } }), client).propose({ request });
+    const params = beta.mock.calls[0]?.[0];
+    expect(typeof params.system).toBe('string');
+    expect(JSON.stringify(params)).not.toContain('cache_control');
+  });
+
+  it('promptCache=document 면 문서를 맨 앞에 따로 두고 캐시 표시를 붙인다(캐시 표시는 2곳, 상한 4곳)', async () => {
+    const { client, beta } = fakeClient();
+    await new AnthropicProvider(settings({}, { default: { promptCache: 'document' } }), client).propose({ request });
+    const params = beta.mock.calls[0]?.[0];
+    expect(params.messages[0]).toEqual({ role: 'user', content: [{ type: 'text', text: expect.stringContaining('<document kind="docx">'), cache_control: { type: 'ephemeral' } }] });
+    expect(params.messages.at(-1).content).toContain('<instruction>');
+    expect(params.messages.at(-1).content).not.toContain('<document');
+    expect(JSON.stringify(params).match(/cache_control/g)).toHaveLength(2);
   });
 
   it('fallbacks 를 끄면 베타가 아닌 일반 호출을 쓴다', async () => {

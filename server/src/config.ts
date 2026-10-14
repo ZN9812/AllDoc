@@ -33,7 +33,12 @@ export interface AiTaskSettings {
   systemPrompt: string;
   /** 모델이 정책상 답을 거절하면 서버가 대체 모델로 한 번 더 시도하게 하는 Anthropic 옵션 */
   fallbacks: boolean;
+  /** 프롬프트 캐싱 범위: off(안 함) · system(시스템 프롬프트, 기본) · document(시스템 프롬프트 + 문서) */
+  promptCache: PromptCacheMode;
 }
+
+export const PROMPT_CACHE_MODES = ['off', 'system', 'document'] as const;
+export type PromptCacheMode = (typeof PROMPT_CACHE_MODES)[number];
 
 export interface Config {
   port: number;
@@ -87,6 +92,7 @@ const TaskFileSchema = z
     /** 기본 시스템 프롬프트 뒤에 규칙을 덧붙인다 */
     systemPromptAppend: z.string().min(1).optional(),
     fallbacks: z.enum(['default', 'off']).optional(),
+    promptCache: z.enum(PROMPT_CACHE_MODES).optional(),
   })
   .strict();
 
@@ -213,6 +219,7 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
       apiKey,
       systemPrompt: base,
       fallbacks: (merged.fallbacks ?? 'default') === 'default',
+      promptCache: merged.promptCache ?? 'system',
     };
   }
 
