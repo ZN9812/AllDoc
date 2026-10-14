@@ -29,3 +29,5 @@ web/public/rhwp-studio/
 # 빌드 전에 묶는 LaTeX 템플릿(templates/latex)
 web/public/templates/
 e2e/.data-tex/
+# 로그 해석 시험 자료(실제 TeX 로그)는 저장소에 둔다
+!shared/src/tex/fixtures/*.log

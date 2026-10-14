@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       texlive-latex-base texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended \
       texlive-science texlive-pictures texlive-plain-generic texlive-bibtex-extra biber \
       texlive-xetex texlive-luatex texlive-lang-korean texlive-lang-cjk texlive-lang-english latexmk \
-      fonts-noto-cjk fonts-nanum \
+      fonts-noto-cjk fonts-nanum fontconfig \
       bubblewrap util-linux ca-certificates \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/*
 # 루트가 읽기 전용이라 작업마다 만들지 않도록 글꼴 목록과 LuaTeX 글꼴 캐시를 미리 만든다(첫 LuaLaTeX 75초 → 캐시 사용).
