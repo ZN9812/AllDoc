@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { DOC_KINDS } from './doc';
+import { TEX_BLOCK_ROLES } from './tex/chunk';
 
 /** 글자 서식(문단 맨 앞 글자 기준으로 읽는다) */
 export const CharStyleSchema = z.object({
@@ -81,6 +82,18 @@ export function areaLabel(a: AreaPlace): string {
   return a.section !== undefined ? `${head} · 구역 ${a.section}` : head;
 }
 
+/** LaTeX 블록이 어느 파일 몇 번째 줄에 있는지(docs/LATEX.md "블록 모델"). LaTeX 프로젝트의 문단(블록)에만 있다. */
+export const SourcePlaceSchema = z.object({
+  file: z.string().max(400),
+  /** 블록이 시작하는 줄(1부터) */
+  line: z.number().int().min(1),
+  role: z.enum(TEX_BLOCK_ROLES),
+});
+export type SourcePlace = z.infer<typeof SourcePlaceSchema>;
+
+/** 사람에게 보여 줄 위치 문구. 예: "chapters/intro.tex 42행" */
+export const sourceLabel = (s: Pick<SourcePlace, 'file' | 'line'>): string => `${s.file} ${s.line}행`;
+
 /** 문서의 문단 하나. index 는 각 편집기 연결부가 정한 번호이고 변경 제안이 이 번호를 가리킨다. */
 export const ParagraphInfoSchema = z.object({
   index: z.number().int().min(0),
@@ -91,6 +104,8 @@ export const ParagraphInfoSchema = z.object({
   cell: CellPlaceSchema.optional(),
   /** 머리말·꼬리말·각주·미주·글상자 안의 문단이면 그 위치. 서식 점검은 본문 문단만 비교한다. */
   area: AreaPlaceSchema.optional(),
+  /** LaTeX 블록이면 그 파일·줄·역할. 서식 점검에서는 본문으로 본다(LaTeX 는 서식 점검 대상이 아니다). */
+  src: SourcePlaceSchema.optional(),
 });
 export type ParagraphInfo = z.infer<typeof ParagraphInfoSchema>;
 
@@ -123,8 +138,9 @@ export type StyleProfile = z.infer<typeof StyleProfileSchema>;
 export const isBodyParagraph = (p: Pick<ParagraphInfo, 'cell' | 'area'>): boolean => p.cell === undefined && p.area === undefined;
 
 /** 문단의 위치 문구(표 칸이나 머리말·각주·글상자 등). 본문 문단이면 undefined. */
-export function placeOfParagraph(p: Pick<ParagraphInfo, 'cell' | 'area'>): string | undefined {
+export function placeOfParagraph(p: Pick<ParagraphInfo, 'cell' | 'area' | 'src'>): string | undefined {
   if (p.cell) return placeLabel(p.cell);
   if (p.area) return areaLabel(p.area);
+  if (p.src) return sourceLabel(p.src);
   return undefined;
 }

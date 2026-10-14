@@ -60,8 +60,7 @@ export function baseName(fileName: string): string {
 
 /** 문서를 글로 읽을 수 있는 형식인지(AI 대상) */
 export function isAiTarget(kind: DocKind): boolean {
-  // LaTeX AI 는 M3 에서 넣는다(docs/LATEX.md). 그 전까지 tex 는 AI 대상이 아니다.
-  return kind !== 'pdf' && kind !== 'tex';
+  return kind !== 'pdf';
 }
 
 /** 내용을 고칠 수 있는 형식인지 */

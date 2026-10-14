@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { AUTH_MODES, DEFAULT_COMPILE_LIMITS, MAX_DOC_CHARS, PlanSchema, type AiMode, type AuthMode, type Plan } from '@alldoc/shared';
+import { AI_TASKS, AUTH_MODES, DEFAULT_COMPILE_LIMITS, MAX_DOC_CHARS, PlanSchema, type AiTask, type AuthMode, type Plan } from '@alldoc/shared';
 import { buildSystemPrompt } from './ai/prompt';
 
 export class ConfigError extends Error {
@@ -21,7 +21,7 @@ export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 export const DEFAULT_MODEL = 'claude-opus-5-5';
 
-/** 작업 하나(AI 대화, 서식 점검)를 처리할 AI 연결의 최종 설정 */
+/** 작업 하나(AI 대화, 서식 점검, LaTeX 대화, LaTeX 오류 고치기)를 처리할 AI 연결의 최종 설정 */
 export interface AiTaskSettings {
   provider: ProviderId;
   model: string;
@@ -54,7 +54,8 @@ export interface Config {
   backup: { dir: string; keep: number };
   webDist: string;
   allowedOrigins: string[];
-  ai: Record<AiMode, AiTaskSettings>;
+  /** 작업별 AI 설정(chat·format_check·tex_chat·tex_fix) */
+  ai: Record<AiTask, AiTaskSettings>;
   /** 요금제 목록과 기본 요금제. PLANS_CONFIG_PATH 가 없으면 DAILY_AI_LIMIT 로 만든 free 하나 */
   plans: { defaultPlanId: string; list: Plan[] };
   /** 전체 하루 AI 원가 상한(마이크로달러). 넘으면 그날은 AI 를 멈춘다(503). null 이면 없음 */
@@ -145,7 +146,10 @@ const TaskFileSchema = z
 export const AiConfigFileSchema = z
   .object({
     default: TaskFileSchema.optional(),
-    tasks: z.object({ chat: TaskFileSchema.optional(), format_check: TaskFileSchema.optional() }).strict().optional(),
+    tasks: z
+      .object({ chat: TaskFileSchema.optional(), format_check: TaskFileSchema.optional(), tex_chat: TaskFileSchema.optional(), tex_fix: TaskFileSchema.optional() })
+      .strict()
+      .optional(),
   })
   .strict();
 export type AiConfigFile = z.infer<typeof AiConfigFileSchema>;
@@ -234,8 +238,8 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
     }
   }
 
-  const ai = {} as Record<AiMode, AiTaskSettings>;
-  for (const mode of ['chat', 'format_check'] as const) {
+  const ai = {} as Record<AiTask, AiTaskSettings>;
+  for (const mode of AI_TASKS) {
     const merged = { ...file.default, ...file.tasks?.[mode] };
     const label = `AI 설정(${mode})`;
     if (merged.systemPrompt && merged.systemPromptFile) problems.push(`${label}: systemPrompt 와 systemPromptFile 은 함께 쓸 수 없어요.`);

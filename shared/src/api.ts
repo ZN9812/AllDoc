@@ -2,12 +2,32 @@ import { z } from 'zod';
 import { DocSummarySchema, StyleProfileSchema } from './style';
 import { ProposalSchema } from './ops';
 import { PlanInfoSchema } from './billing';
-import { CompileInfoSchema } from './tex/api';
+import { CompileInfoSchema, TexDiagnosticSchema } from './tex/api';
 
 export { MAX_DOC_CHARS } from './limits';
 
-export const AI_MODES = ['chat', 'format_check'] as const;
+/** 화면에서 고르는 AI 요청 갈래. tex_fix 는 LaTeX 컴파일 탭의 "AI로 오류 고치기" */
+export const AI_MODES = ['chat', 'format_check', 'tex_fix'] as const;
 export type AiMode = (typeof AI_MODES)[number];
+
+/**
+ * 서버 안의 AI 작업. 작업마다 모델·시스템 프롬프트를 따로 정할 수 있다(docs/AI.md).
+ * LaTeX 프로젝트의 대화는 tex_chat, 오류 고치기는 tex_fix 로 보낸다.
+ */
+export const AI_TASKS = ['chat', 'format_check', 'tex_chat', 'tex_fix'] as const;
+export type AiTask = (typeof AI_TASKS)[number];
+
+export function taskOf(req: Pick<AiRequest, 'mode' | 'document'>): AiTask {
+  if (req.document.kind === 'tex') return req.mode === 'tex_fix' ? 'tex_fix' : 'tex_chat';
+  return req.mode === 'tex_fix' ? 'chat' : req.mode;
+}
+
+/** 오류 고치기에 함께 보내는 컴파일 결과(진단 50개, 로그 끝 8,000자까지) */
+export const CompileContextSchema = z.object({
+  diagnostics: z.array(TexDiagnosticSchema).max(50),
+  logExcerpt: z.string().max(8000),
+});
+export type CompileContext = z.infer<typeof CompileContextSchema>;
 
 /** 서식 점검 기준: 문서 안 일관성(기본) · 기준 문서 · 내 규칙 */
 export const CRITERIA = ['consistency', 'reference', 'rules'] as const;
@@ -27,6 +47,8 @@ export const AiRequestSchema = z.object({
   reference: StyleProfileSchema.optional(),
   /** criteria === 'rules' */
   rulesText: z.string().max(4000).optional(),
+  /** mode === 'tex_fix' */
+  compile: CompileContextSchema.optional(),
 });
 export type AiRequest = z.infer<typeof AiRequestSchema>;
 

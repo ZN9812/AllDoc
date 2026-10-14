@@ -29,9 +29,9 @@ describe('파일 형식 판별', () => {
     expect(isFormatKind('tex')).toBe(false);
   });
 
-  it('PDF 와 LaTeX(M3 전까지)는 AI 대상이 아니다', () => {
+  it('PDF 는 AI 대상이 아니고 LaTeX 는 대상이다', () => {
     expect(isAiTarget('pdf')).toBe(false);
-    expect(isAiTarget('tex')).toBe(false);
+    expect(isAiTarget('tex')).toBe(true);
     expect(isAiTarget('hwp')).toBe(true);
   });
 });

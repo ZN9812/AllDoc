@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { join } from 'node:path';
 import { createApp } from './app';
+import { AI_TASKS } from '@alldoc/shared';
 import { createProviders } from './ai/providers';
 import { ConfigError, loadConfig } from './config';
 import { loadDotEnv } from './dotenv';
@@ -88,7 +89,7 @@ const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
       : 'LaTeX 컴파일: 꺼짐(COMPILER=off)',
   );
   if (config.aiDailyBudgetMicroUsd !== null) console.log(`AI 전체 하루 비용 상한: $${config.aiDailyBudgetMicroUsd / 1_000_000}`);
-  for (const mode of ['chat', 'format_check'] as const) {
+  for (const mode of AI_TASKS) {
     const p = providers[mode];
     const s = config.ai[mode];
     console.log(`AI(${mode}): ${p ? `${p.id}${p.demo ? ' [데모]' : ` · ${s.model}`}` : '연결 안 됨'}`);

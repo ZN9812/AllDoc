@@ -1,7 +1,7 @@
 // AI 사용량 원장. 요청마다 토큰과 원가를 한 줄씩 남겨 기능별 원가(p50/p95)를 계산하는 데 쓴다.
 // 문서 글·지시문·응답 글은 남기지 않는다(docs/AI.md 의 약속). 남기는 것은 숫자와 모델 이름뿐이다.
 import type { DatabaseSync } from 'node:sqlite';
-import type { AiMode, TexEngine } from '@alldoc/shared';
+import type { AiTask, TexEngine } from '@alldoc/shared';
 import { costOf } from './ai/pricing';
 import type { ProviderUsage } from './ai/types';
 
@@ -15,7 +15,8 @@ export interface AiEventInput {
   userId: string | null;
   /** 요청 당시의 요금제(로그인 없는 설치는 anonymous) */
   planId: string | null;
-  task: AiMode;
+  /** 서버 안의 AI 작업(chat·format_check·tex_chat·tex_fix) */
+  task: AiTask;
   provider: string;
   /** 사용량을 받지 못한 실패에서도 어떤 모델에 보냈는지 남긴다 */
   modelRequested: string;

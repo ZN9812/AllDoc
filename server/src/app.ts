@@ -2,7 +2,7 @@ import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { compress } from 'hono/compress';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
-import { ACCOUNT_DELETE_CONFIRM, AgreeRequestSchema, AiRequestSchema, ERROR_CODES, isAiTarget, MAX_DOC_CHARS, type AiResponse, type MeResponse, type Quota } from '@alldoc/shared';
+import { ACCOUNT_DELETE_CONFIRM, AgreeRequestSchema, AiRequestSchema, ERROR_CODES, isAiTarget, MAX_DOC_CHARS, taskOf, type AiResponse, type MeResponse, type Quota } from '@alldoc/shared';
 import { toProposals } from './ai/convert';
 import type { Providers } from './ai/providers';
 import { ProviderFailedError, ProviderRefusedError, type ProviderUsage } from './ai/types';
@@ -271,6 +271,10 @@ export function createApp(deps: AppDeps): Hono {
       const req = parsed.data;
 
       if (!isAiTarget(req.document.kind)) return fail(c, 400, ERROR_CODES.badRequest, 'PDF는 AI로 고칠 수 없어요.');
+      if (req.document.kind === 'tex' && req.mode === 'format_check') return fail(c, 400, ERROR_CODES.badRequest, 'LaTeX 원고는 서식 점검을 하지 않아요.');
+      if (req.mode === 'tex_fix' && (req.document.kind !== 'tex' || !req.compile)) return fail(c, 400, ERROR_CODES.badRequest, '오류 고치기는 LaTeX 프로젝트의 컴파일 결과와 함께 보내야 해요.');
+      if (req.document.kind === 'tex' && req.document.paragraphs.some((p) => !p.src)) return fail(c, 400, ERROR_CODES.badRequest, 'LaTeX 원고 블록에 파일 위치가 없어요.');
+      const task = taskOf(req);
       if (req.mode === 'chat' && req.instruction.trim() === '') return fail(c, 400, ERROR_CODES.badRequest, 'AI에게 시킬 내용을 적어 주세요.');
       if (req.mode === 'format_check' && req.criteria === 'rules' && !req.rulesText?.trim()) {
         return fail(c, 400, ERROR_CODES.badRequest, '점검할 규칙을 적어 주세요.');
@@ -280,7 +284,7 @@ export function createApp(deps: AppDeps): Hono {
         return fail(c, 413, ERROR_CODES.tooLarge, `문서가 너무 길어요(${chars.toLocaleString('ko-KR')}자). AI는 한 번에 ${MAX_DOC_CHARS.toLocaleString('ko-KR')}자까지 볼 수 있어요.`);
       }
 
-      const provider = providers[req.mode];
+      const provider = providers[task];
       if (!provider) return fail(c, 503, ERROR_CODES.aiUnavailable, '이 서버에는 AI가 연결되어 있지 않아요.');
       if (user && needsAgreement(user.id)) return fail(c, 403, ERROR_CODES.agreementRequired, '이용약관에 동의한 뒤에 AI를 쓸 수 있어요.');
 
@@ -323,9 +327,9 @@ export function createApp(deps: AppDeps): Hono {
             day,
             userId: user?.id ?? null,
             planId: ent.planId,
-            task: req.mode,
+            task,
             provider: provider.id,
-            modelRequested: usage?.modelRequested ?? (provider.demo ? 'mock' : config.ai[req.mode].model),
+            modelRequested: usage?.modelRequested ?? (provider.demo ? 'mock' : config.ai[task].model),
             usage,
             docChars: chars,
             proposals,
@@ -341,11 +345,11 @@ export function createApp(deps: AppDeps): Hono {
       const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(AI_TIMEOUT_MS)]);
       try {
         const result = await provider.propose({ request: req, signal });
-        const { proposals, dropped } = toProposals(result.proposals, req.document);
+        const { proposals, dropped, rejected } = toProposals(result.proposals, req.document, undefined, req.document.kind === 'tex' ? { task, instruction: req.instruction, compile: req.compile } : null);
         let reply = result.reply.trim() || (proposals.length > 0 ? `제안 ${proposals.length}개를 만들었어요.` : '고칠 곳을 찾지 못했어요.');
         if (dropped > 0) reply += `\n(문서와 맞지 않는 제안 ${dropped}개는 제외했어요.)`;
         const cost = record('ok', result.usage, proposals.length, dropped);
-        log('AI 요청 완료', { mode: req.mode, provider: provider.id, model: result.usage?.modelServed, chars, proposals: proposals.length, dropped, costMicroUsd: cost, ms: Date.now() - started });
+        log('AI 요청 완료', { mode: req.mode, task, provider: provider.id, ...(rejected.length > 0 ? { texRulesRejected: rejected } : {}), model: result.usage?.modelServed, chars, proposals: proposals.length, dropped, costMicroUsd: cost, ms: Date.now() - started });
         const out: AiResponse = {
           reply,
           proposals,

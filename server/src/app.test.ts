@@ -39,7 +39,7 @@ function setup(env: Record<string, string> = {}, over: Partial<AppDeps> = {}) {
     accounts,
     entitlements,
     audit: new AuditLog(db),
-    providers: { chat: provider, format_check: provider },
+    providers: { chat: provider, format_check: provider, tex_chat: provider, tex_fix: provider },
     now: () => NOW,
     log: () => undefined,
     ...over,
@@ -89,7 +89,7 @@ describe('내 정보(/api/me)', () => {
   });
 
   it('AI 가 연결되지 않았으면 그렇게 알려 준다', async () => {
-    const { app } = setup({}, { providers: { chat: null, format_check: null } });
+    const { app } = setup({}, { providers: { chat: null, format_check: null, tex_chat: null, tex_fix: null } });
     const me = (await (await app.request('/api/me')).json()) as MeResponse;
     expect(me.ai).toEqual({ available: false, demo: false, provider: 'none' });
   });
@@ -253,7 +253,7 @@ describe('AI 제안(/api/ai/propose)', () => {
 
   it('AI 서비스 문제로 실패하면 502 로 알리고 사용 횟수를 돌려준다', async () => {
     const failing: AiProvider = { id: 'x', demo: false, propose: async () => { throw new ProviderFailedError('AI 서비스가 지금 혼잡해요.'); } };
-    ctx = setup({}, { providers: { chat: failing, format_check: failing } });
+    ctx = setup({}, { providers: { chat: failing, format_check: failing, tex_chat: failing, tex_fix: failing } });
     const cookie = await login(ctx.app);
     const res = await post(ctx.app, chatBody(), cookie);
     expect(res.status).toBe(502);
@@ -264,7 +264,7 @@ describe('AI 제안(/api/ai/propose)', () => {
 
   it('예상하지 못한 오류도 사용자에게 내부 내용을 보이지 않고 횟수를 돌려준다', async () => {
     const broken: AiProvider = { id: 'x', demo: false, propose: async () => { throw new Error('sk-secret internal'); } };
-    ctx = setup({}, { providers: { chat: broken, format_check: broken } });
+    ctx = setup({}, { providers: { chat: broken, format_check: broken, tex_chat: broken, tex_fix: broken } });
     const cookie = await login(ctx.app);
     const res = await post(ctx.app, chatBody(), cookie);
     expect(res.status).toBe(502);
@@ -274,7 +274,7 @@ describe('AI 제안(/api/ai/propose)', () => {
 
   it('모델이 거절하면 422 로 알리고 횟수는 돌려주지 않는다', async () => {
     const refusing: AiProvider = { id: 'x', demo: false, propose: async () => { throw new ProviderRefusedError(); } };
-    ctx = setup({}, { providers: { chat: refusing, format_check: refusing } });
+    ctx = setup({}, { providers: { chat: refusing, format_check: refusing, tex_chat: refusing, tex_fix: refusing } });
     const cookie = await login(ctx.app);
     const res = await post(ctx.app, chatBody(), cookie);
     expect(res.status).toBe(422);
@@ -285,7 +285,7 @@ describe('AI 제안(/api/ai/propose)', () => {
   it('같은 사용자의 요청이 끝나기 전에 또 보내면 거절하고 횟수를 쓰지 않는다', async () => {
     let release: (r: ProviderResult) => void = () => undefined;
     const slow: AiProvider = { id: 'x', demo: false, propose: () => new Promise<ProviderResult>((r) => (release = r)) };
-    ctx = setup({}, { providers: { chat: slow, format_check: slow } });
+    ctx = setup({}, { providers: { chat: slow, format_check: slow, tex_chat: slow, tex_fix: slow } });
     const cookie = await login(ctx.app);
     const first = post(ctx.app, chatBody(), cookie);
     await vi.waitFor(() => expect(ctx.quota.used('dev:테스터', '2026-10-01')).toBe(1));
@@ -310,7 +310,7 @@ describe('AI 제안(/api/ai/propose)', () => {
         ],
       }),
     };
-    ctx = setup({}, { providers: { chat: sloppy, format_check: sloppy } });
+    ctx = setup({}, { providers: { chat: sloppy, format_check: sloppy, tex_chat: sloppy, tex_fix: sloppy } });
     const body = (await (await post(ctx.app, chatBody(), await login(ctx.app))).json()) as AiResponse;
     expect(body.proposals).toHaveLength(1);
     expect(body.reply).toContain('1개는 제외했어요');
@@ -338,7 +338,7 @@ describe('AI 제안(/api/ai/propose)', () => {
   });
 
   it('AI 가 연결되지 않은 서버는 503', async () => {
-    ctx = setup({}, { providers: { chat: null, format_check: null } });
+    ctx = setup({}, { providers: { chat: null, format_check: null, tex_chat: null, tex_fix: null } });
     const res = await post(ctx.app, chatBody(), await login(ctx.app));
     expect(res.status).toBe(503);
     expect((await errorOf(res)).code).toBe('ai_unavailable');
@@ -356,10 +356,38 @@ describe('AI 제안(/api/ai/propose)', () => {
     expect(vite.status).toBe(200);
   });
 
+  it('LaTeX 프로젝트의 대화는 tex_chat, 오류 고치기는 tex_fix 연결부로 가고, 원장에 작업 이름이 남는다', async () => {
+    const mk = (name: string): AiProvider => ({ id: name, demo: false, propose: vi.fn(async () => ({ reply: name, proposals: [] })) });
+    const chat = mk('chat');
+    const texChat = mk('tex_chat');
+    const texFix = mk('tex_fix');
+    const db = openDb(':memory:');
+    const ledger = new LedgerStore(db);
+    ctx = setup({}, { providers: { chat, format_check: null, tex_chat: texChat, tex_fix: texFix }, ledger });
+    const cookie = await login(ctx.app);
+    const texDoc = { kind: 'tex' as const, paragraphs: [{ index: 1, text: '몇일 뒤', char: {}, para: {}, src: { file: 'main.tex', line: 3, role: 'body' as const } }] };
+    const compile = { diagnostics: [{ severity: 'error' as const, file: 'main.tex', line: 3, message: 'x' }], logExcerpt: '' };
+    expect(((await (await post(ctx.app, chatBody({ document: texDoc }), cookie)).json()) as AiResponse).reply).toBe('tex_chat');
+    expect(((await (await post(ctx.app, chatBody({ mode: 'tex_fix', document: texDoc, compile }), cookie)).json()) as AiResponse).reply).toBe('tex_fix');
+    expect(chat.propose).not.toHaveBeenCalled();
+    expect(db.prepare('SELECT task FROM ai_events ORDER BY id').all()).toEqual([{ task: 'tex_chat' }, { task: 'tex_fix' }]);
+  });
+
+  it('LaTeX 의 서식 점검, 컴파일 결과 없는 오류 고치기, 위치(src) 없는 블록, LaTeX 가 아닌 문서의 오류 고치기는 400', async () => {
+    ctx = setup();
+    const cookie = await login(ctx.app);
+    const texDoc = { kind: 'tex' as const, paragraphs: [{ index: 1, text: '가', char: {}, para: {}, src: { file: 'main.tex', line: 3, role: 'body' as const } }] };
+    const compile = { diagnostics: [], logExcerpt: '' };
+    expect((await post(ctx.app, chatBody({ mode: 'format_check', instruction: '', criteria: 'rules', rulesText: '11pt', document: texDoc }), cookie)).status).toBe(400);
+    expect((await post(ctx.app, chatBody({ mode: 'tex_fix', document: texDoc }), cookie)).status).toBe(400);
+    expect((await post(ctx.app, chatBody({ document: { kind: 'tex', paragraphs: [{ index: 1, text: '가', char: {}, para: {} }] } }), cookie)).status).toBe(400);
+    expect((await post(ctx.app, chatBody({ mode: 'tex_fix', compile }), cookie)).status).toBe(400);
+  });
+
   it('서식 점검(내 규칙)은 format_check 연결부로 간다', async () => {
     const chat: AiProvider = { id: 'chat', demo: false, propose: vi.fn(async () => ({ reply: 'chat', proposals: [] })) };
     const fmt: AiProvider = { id: 'fmt', demo: false, propose: vi.fn(async () => ({ reply: 'fmt', proposals: [] })) };
-    ctx = setup({}, { providers: { chat, format_check: fmt } });
+    ctx = setup({}, { providers: { chat, format_check: fmt, tex_chat: null, tex_fix: null } });
     const cookie = await login(ctx.app);
     const body = (await (await post(ctx.app, chatBody({ mode: 'format_check', instruction: '', criteria: 'rules', rulesText: '본문 11pt' }), cookie)).json()) as AiResponse;
     expect(body.reply).toBe('fmt');
@@ -546,7 +574,7 @@ describe('요금제와 한도', () => {
       accounts: new AccountStore(db),
       entitlements: new EntitlementStore(db, config),
       audit: new AuditLog(db),
-      providers: { chat: new MockProvider(), format_check: new MockProvider() },
+      providers: { chat: new MockProvider(), format_check: new MockProvider(), tex_chat: new MockProvider(), tex_fix: new MockProvider() },
       now: () => NOW,
       log: () => undefined,
       ...over,
@@ -647,7 +675,7 @@ describe('AI 사용량 원장 기록', () => {
     const cut: AiProvider = { id: 'anthropic', demo: false, propose: async () => { throw new ProviderFailedError('끊겼어요', undefined, usage); } };
     const down: AiProvider = { id: 'anthropic', demo: false, propose: async () => { throw new ProviderFailedError('연결하지 못했어요'); } };
     for (const p of [refusing, cut, down]) {
-      const { app } = setup({}, { ledger, providers: { chat: p, format_check: p } });
+      const { app } = setup({}, { ledger, providers: { chat: p, format_check: p, tex_chat: p, tex_fix: p } });
       await post(app, chatBody(), await login(app));
     }
     // 4,000 + 2,000 마이크로달러씩 두 건

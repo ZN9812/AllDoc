@@ -1,15 +1,15 @@
-import type { AiMode } from '@alldoc/shared';
+import { AI_TASKS, type AiTask } from '@alldoc/shared';
 import type { Config } from '../config';
 import { AnthropicProvider } from './anthropic';
 import { MockProvider } from './mock';
 import type { AiProvider } from './types';
 
-export type Providers = Record<AiMode, AiProvider | null>;
+export type Providers = Record<AiTask, AiProvider | null>;
 
 /** 설정대로 작업별 AI 연결부를 만든다. 쓸 수 없는 작업(키 없음, off)은 null 이다. */
 export function createProviders(config: Pick<Config, 'ai'>, warn: (message: string) => void = (m) => console.warn(m)): Providers {
   const out = {} as Providers;
-  for (const mode of ['chat', 'format_check'] as const) {
+  for (const mode of AI_TASKS) {
     const s = config.ai[mode];
     if (s.provider === 'mock') out[mode] = new MockProvider();
     else if (s.provider === 'anthropic') {
