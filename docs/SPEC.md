@@ -24,7 +24,7 @@
 | DOCX | 가능 | DOCX | SuperDoc (AGPL-3.0) |
 | PDF | 보기만 | PDF 내보내기(각 형식에서) | pdf.js (Apache-2.0) |
 | TXT, Markdown | 가능 | 같은 형식 | 자체 구현 |
-| LaTeX 프로젝트(.tex, .zip) — **M2 구현(AI 없음)** | 가능(서버 컴파일 PDF 미리보기) | ZIP, 지금 연 .tex, PDF | CodeMirror 6 (MIT), TeX Live — `docs/LATEX.md` |
+| LaTeX 프로젝트(.tex, .zip) — **M2·M3 구현(AI 는 데모 AI 로만 시험)** | 가능(서버 컴파일 PDF 미리보기) | ZIP, 지금 연 .tex, PDF | CodeMirror 6 (MIT), TeX Live — `docs/LATEX.md` |
 
 - 각 형식은 **원본 형식 그대로** 저장한다. 원본은 덮어쓰지 않고 새 파일로 내려받는다.
 - 이번 범위에서 제외: Excel, PowerPoint, 구형 .doc, HWP 3.x.

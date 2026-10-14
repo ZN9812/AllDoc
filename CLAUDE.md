@@ -1,7 +1,7 @@
 # AllDoc 작업 안내
 
 한글(HWP·HWPX)·Word(DOCX)·TXT/MD 를 브라우저에서 편집하고 PDF 는 보기만 하는 웹 편집기다. AI 는 서식·문장 변경을 **제안만** 하고, 사용자가 적용한 것만 문서에 반영된다.
-"AllDoc"은 임시 이름이다. 라이선스는 AGPL-3.0. 제품 명세 `docs/SPEC.md`, 화면 규칙 `docs/DESIGN.md`, AI 연결 `docs/AI.md`, 배포와 **알려진 한계(확인한 수치 포함)** `docs/DEPLOY.md`, 한글 캡션 조사 `docs/CAPTION.md`, 제품화(계정·요금제·결제) 계획 `docs/PRODUCT.md`(M1 구현, 결제는 아직), LaTeX 편집 설계와 구현 상태 `docs/LATEX.md`(M2 편집·컴파일은 구현, AI(M3)는 아직). `docs/TRUST.md` 는 검토 후 **진행하지 않기로 한** 존재 증명·종단간 암호화 저장 설계 기록이다(다시 제안하기 전에 읽는다).
+"AllDoc"은 임시 이름이다. 라이선스는 AGPL-3.0. 제품 명세 `docs/SPEC.md`, 화면 규칙 `docs/DESIGN.md`, AI 연결 `docs/AI.md`, 배포와 **알려진 한계(확인한 수치 포함)** `docs/DEPLOY.md`, 한글 캡션 조사 `docs/CAPTION.md`, 제품화(계정·요금제·결제) 계획 `docs/PRODUCT.md`(M1 구현, 결제는 아직), LaTeX 편집 설계와 구현 상태 `docs/LATEX.md`(M2 편집·컴파일, M3 AI 제안 구현. M3 는 데모 AI 로만 시험). `docs/TRUST.md` 는 검토 후 **진행하지 않기로 한** 존재 증명·종단간 암호화 저장 설계 기록이다(다시 제안하기 전에 읽는다).
 
 ## 작업 규칙
 - 사용자에게 보이는 글은 모두 한국어로 쓴다: 답변, 화면 문구, 문서, 오류 메시지, 시험 이름, 커밋 메시지.
@@ -15,7 +15,7 @@
 shared/  웹·서버 공용 타입과 zod 스키마 (문단 위치 CellPlace·AreaPlace, 변경 Op, textGuard)
 web/     React 19 + Vite + vitest. 문서 엔진 web/src/engines/{hwp,docx,...}, 화면 web/src/editor
 server/  Hono. 로그인·계정·요금제 한도·AI 중계·원장·LaTeX 컴파일 중계(server/src/tex: 해시 대조·대기열·가짜 컴파일러). SQLite 는 server/src/db(번호 붙은 마이그레이션), 관리자 도구 server/src/admin.ts.
-         AI 프롬프트와 데모 AI 는 server/src/ai/{prompt,mock}.ts
+         AI 프롬프트와 데모 AI 는 server/src/ai/{prompt,mock}.ts. LaTeX 블록 나누기·검증 규칙은 shared/src/tex/{chunk,check}.ts(웹·서버 공용)
 compiler/ LaTeX 컴파일 일꾼(별도 이미지 compiler/Dockerfile). bubblewrap 격리, 탈출 시험 compiler/test/escape/run.ts
 templates/latex/  LaTeX 템플릿. 빌드 때 web/public/templates/*.zip 으로 묶는다(web/scripts/pack-templates.mjs)
 e2e/     Playwright. 빌드한 서버(포트 8799, AUTH_MODE=dev, AI_PROVIDER=mock, COMPILER=mock)에 붙는다
