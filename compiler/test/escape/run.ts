@@ -139,16 +139,20 @@ const cases: Array<[string, () => Promise<void>]> = [
     'LuaTeX: os.execute·io.popen 이 막히고 io.open 으로 /etc/passwd 를 읽지 못한다',
     async () => {
       let files: string[] = [];
-      const lua = String.raw`\directlua{
-        local ok1, r1 = pcall(os.execute, "touch pwned-lua.txt")
-        texio.write_nl("ESC-EXEC=" .. tostring(ok1) .. "/" .. tostring(r1))
-        local ok2, p = pcall(io.popen, "id")
-        texio.write_nl("ESC-POPEN=" .. tostring(ok2 and p ~= nil))
-        local f = io.open("/etc/passwd", "r")
-        texio.write_nl("ESC-PASSWD=" .. (f and (f:read("*l") or "") or "nil"))
-        texio.write_nl("ESC-ENV=" .. tostring(os.getenv("ALLDOC_ESCAPE_CANARY")))
-      }x`;
-      const r = await runJob(job({ 'main.tex': doc(lua) }, { engine: 'lualatex', timeoutSec: 120 }), { ...opt, inspect: (d) => void (files = listFiles(d).map((f) => f.path)) });
+      // Lua 코드는 따로 파일에 두고 불러온다(\directlua 안에 바로 쓰면 TeX 판마다 펼치는 방식이 달라 깨진다. TeX Live 2022 에서 확인).
+      const lua = [
+        'local ok1, r1 = pcall(os.execute, "touch pwned-lua.txt")',
+        'texio.write_nl("ESC-EXEC=" .. tostring(ok1) .. "/" .. tostring(r1))',
+        'local ok2, p = pcall(io.popen, "id")',
+        'texio.write_nl("ESC-POPEN=" .. tostring(ok2 and p ~= nil))',
+        'local f = io.open("/etc/passwd", "r")',
+        'texio.write_nl("ESC-PASSWD=" .. (f and (f:read("*l") or "") or "nil"))',
+        'texio.write_nl("ESC-ENV=" .. tostring(os.getenv("ALLDOC_ESCAPE_CANARY")))',
+      ].join('\n');
+      const r = await runJob(job({ 'main.tex': doc('\\directlua{dofile("esc.lua")}x'), 'esc.lua': lua }, { engine: 'lualatex', timeoutSec: 120 }), {
+        ...opt,
+        inspect: (d) => void (files = listFiles(d).map((f) => f.path)),
+      });
       ran(r);
       ok(r.log.includes('ESC-EXEC='), `lualatex 가 돌지 않았어요(status=${r.status})\n${r.log.slice(-1500)}`);
       ok(!files.includes('pwned-lua.txt'), 'os.execute 로 파일이 만들어졌어요');
@@ -160,15 +164,15 @@ const cases: Array<[string, () => Promise<void>]> = [
   [
     '바깥으로 연결하지 못한다(LuaTeX 소켓)',
     async () => {
-      const lua = String.raw`\directlua{
-        local ok, socket = pcall(require, "socket")
-        if not ok or not socket then texio.write_nl("ESC-NET=nosocket") else
-          local c = socket.tcp(); c:settimeout(3)
-          local res, err = c:connect("1.1.1.1", 80)
-          texio.write_nl("ESC-NET=" .. tostring(res) .. "/" .. tostring(err))
-        end
-      }x`;
-      const r = await runJob(job({ 'main.tex': doc(lua) }, { engine: 'lualatex', timeoutSec: 120 }), opt);
+      const lua = [
+        'local ok, socket = pcall(require, "socket")',
+        'if not ok or not socket then texio.write_nl("ESC-NET=nosocket") else',
+        '  local c = socket.tcp(); c:settimeout(3)',
+        '  local res, err = c:connect("1.1.1.1", 80)',
+        '  texio.write_nl("ESC-NET=" .. tostring(res) .. "/" .. tostring(err))',
+        'end',
+      ].join('\n');
+      const r = await runJob(job({ 'main.tex': doc('\\directlua{dofile("net.lua")}x'), 'net.lua': lua }, { engine: 'lualatex', timeoutSec: 120 }), opt);
       ran(r);
       ok(r.log.includes('ESC-NET='), `lualatex 가 돌지 않았어요\n${r.log.slice(-800)}`);
       ok(!r.log.includes('ESC-NET=1/'), '바깥으로 연결됐어요');
@@ -224,8 +228,8 @@ const cases: Array<[string, () => Promise<void>]> = [
   [
     '메모리: 주소 공간 상한에 걸려 실패하고 일꾼은 살아 있다',
     async () => {
-      const lua = String.raw`\directlua{local t = {} for i = 1, 100000 do t[i] = string.rep("x", 1048576) .. i end texio.write_nl("ESC-MEM=done")}x`;
-      const r = await runJob(job({ 'main.tex': doc(lua) }, { engine: 'lualatex', timeoutSec: 60 }), { ...opt, memBytes: 512 * MB });
+      const lua = 'local t = {} for i = 1, 100000 do t[i] = string.rep("x", 1048576) .. i end texio.write_nl("ESC-MEM=done")';
+      const r = await runJob(job({ 'main.tex': doc('\\directlua{dofile("mem.lua")}x'), 'mem.lua': lua }, { engine: 'lualatex', timeoutSec: 60 }), { ...opt, memBytes: 512 * MB });
       ran(r);
       ok(!r.log.includes('ESC-MEM=done'), '100GB 를 잡았다고 나와요');
       ok(r.status !== 'ok', `status=${r.status}`);
