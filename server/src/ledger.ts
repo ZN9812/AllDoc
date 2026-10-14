@@ -69,6 +69,11 @@ export class LedgerStore {
     this.dayCostStmt = this.db.prepare('SELECT COALESCE(SUM(cost_micro_usd), 0) AS n FROM ai_events WHERE day = ?');
   }
 
+  /** 탈퇴: 그 사용자의 줄을 가명으로 바꾼다. 통계는 남고 신원은 사라진다. 바꾼 줄 수를 돌려준다. */
+  pseudonymize(userId: string, alias: string): number {
+    return Number(this.db.prepare('UPDATE ai_events SET user_id = ? WHERE user_id = ?').run(alias, userId).changes);
+  }
+
   /** 한 사용자의 기간 원가 합(마이크로달러). 월 원가 상한에 쓴다. */
   userCost(userId: string, fromDay: string, toDay: string): number {
     return (this.userCostStmt.get(userId, fromDay, toDay) as { n: number }).n;

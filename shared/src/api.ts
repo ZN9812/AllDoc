@@ -63,6 +63,9 @@ export const MeResponseSchema = z.object({
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;
 
+/** 계정 삭제 요청에 함께 보내야 하는 확인 문구(실수로 지우지 않도록) */
+export const ACCOUNT_DELETE_CONFIRM = '계정 삭제';
+
 /** 서버가 돌려주는 오류 형식. message 는 사용자에게 그대로 보여줘도 되는 한국어 문장이다. */
 export const ErrorResponseSchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }),

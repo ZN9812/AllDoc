@@ -2,7 +2,7 @@ import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { compress } from 'hono/compress';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
-import { AiRequestSchema, ERROR_CODES, isAiTarget, MAX_DOC_CHARS, type AiResponse, type MeResponse, type Quota } from '@alldoc/shared';
+import { ACCOUNT_DELETE_CONFIRM, AiRequestSchema, ERROR_CODES, isAiTarget, MAX_DOC_CHARS, type AiResponse, type MeResponse, type Quota } from '@alldoc/shared';
 import { toProposals } from './ai/convert';
 import type { Providers } from './ai/providers';
 import { ProviderFailedError, ProviderRefusedError, type ProviderUsage } from './ai/types';
@@ -21,7 +21,9 @@ import {
   SESSION_TTL_SEC,
   type SessionUser,
 } from './auth/session';
+import type { AuditLog } from './audit';
 import type { AccountStore } from './auth/accounts';
+import { deleteAccount } from './auth/deletion';
 import { monthStart, type EntitlementStore } from './billing/entitlements';
 import type { Config } from './config';
 import type { AiOutcome, LedgerStore } from './ledger';
@@ -33,6 +35,7 @@ export interface AppDeps {
   quota: QuotaStore;
   accounts: AccountStore;
   entitlements: EntitlementStore;
+  audit: AuditLog;
   providers: Providers;
   /** AI 사용량 원장. 없으면 남기지 않는다(시험 등). */
   ledger?: LedgerStore;
@@ -192,6 +195,28 @@ export function createApp(deps: AppDeps): Hono {
 
   app.post('/api/auth/logout', (c) => {
     deleteCookie(c, SESSION_COOKIE, { path: '/' });
+    return c.json({ ok: true });
+  });
+
+  // ---- 계정 ----
+  /** 모든 기기에서 로그아웃: 세션 버전을 올려 이 계정의 모든 쿠키를 무효로 만든다(이 기기 포함). */
+  app.post('/api/account/logout-all', (c) => {
+    const user = userOf(c);
+    if (!user) return fail(c, 401, ERROR_CODES.unauthenticated, '로그인이 필요해요.');
+    accounts.bumpSession(user.id);
+    deleteCookie(c, SESSION_COOKIE, { path: '/' });
+    return c.json({ ok: true });
+  });
+
+  /** 계정 삭제. 실수로 누르지 않도록 본문에 확인 문구를 받는다. 브라우저에 저장된 문서는 서버가 지울 수 없어 화면이 따로 묻는다. */
+  app.post('/api/account/delete', async (c) => {
+    const user = userOf(c);
+    if (!user) return fail(c, 401, ERROR_CODES.unauthenticated, '로그인이 필요해요.');
+    const body = (await c.req.json().catch(() => null)) as { confirm?: unknown } | null;
+    if (body?.confirm !== ACCOUNT_DELETE_CONFIRM) return fail(c, 400, ERROR_CODES.badRequest, `확인 문구로 "${ACCOUNT_DELETE_CONFIRM}"를 적어 주세요.`);
+    deleteAccount({ accounts, entitlements, ledger: deps.ledger, audit: deps.audit, secret: config.sessionSecret }, user.id, user.id, now().getTime());
+    deleteCookie(c, SESSION_COOKIE, { path: '/' });
+    log('계정 삭제');
     return c.json({ ok: true });
   });
 

@@ -1,11 +1,13 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AiRequest, AiResponse, ErrorResponse, MeResponse } from '@alldoc/shared';
+import { ACCOUNT_DELETE_CONFIRM, type AiRequest, type AiResponse, type ErrorResponse, type MeResponse } from '@alldoc/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp, type AppDeps } from './app';
 import { MockProvider } from './ai/mock';
 import { ProviderFailedError, ProviderRefusedError, type AiProvider, type ProviderResult } from './ai/types';
+import { AuditLog } from './audit';
+import { deletedAlias } from './auth/deletion';
 import { AccountStore } from './auth/accounts';
 import { EntitlementStore } from './billing/entitlements';
 import { openDb } from './db';
@@ -36,6 +38,7 @@ function setup(env: Record<string, string> = {}, over: Partial<AppDeps> = {}) {
     quota,
     accounts,
     entitlements,
+    audit: new AuditLog(db),
     providers: { chat: provider, format_check: provider },
     now: () => NOW,
     log: () => undefined,
@@ -46,6 +49,7 @@ function setup(env: Record<string, string> = {}, over: Partial<AppDeps> = {}) {
 }
 
 type App = ReturnType<typeof setup>['app'];
+const ctxSecret = () => testConfig().sessionSecret;
 
 async function login(app: App, user = '테스터'): Promise<string> {
   const res = await app.request(`/api/auth/login?user=${encodeURIComponent(user)}&next=/edit/1`);
@@ -454,6 +458,43 @@ describe('계정과 세션 무효화', () => {
   });
 });
 
+describe('계정 API: 모든 기기 로그아웃·계정 삭제', () => {
+  const me = async (app: App, cookie: string) => (await (await app.request('/api/me', { headers: { cookie } })).json()) as MeResponse;
+  const postJson = (app: App, path: string, cookie: string | undefined, body: unknown = {}) =>
+    app.request(path, { method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body) });
+
+  it('모든 기기에서 로그아웃하면 이 쿠키와 다른 기기의 쿠키가 모두 무효가 된다', async () => {
+    const { app } = setup();
+    const a = await login(app);
+    const b = await login(app); // 다른 기기
+    const res = await postJson(app, '/api/account/logout-all', a);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('set-cookie')).toContain('alldoc_session=;');
+    expect((await me(app, a)).authenticated).toBe(false);
+    expect((await me(app, b)).authenticated).toBe(false);
+    expect((await postJson(app, '/api/account/logout-all', undefined)).status).toBe(401);
+  });
+
+  it('계정 삭제: 확인 문구가 있어야 하고, 지우면 옛 쿠키는 401, 원장은 가명, 수동 요금제는 회수, 기록은 가명으로 남는다', async () => {
+    const db = openDb(':memory:');
+    const ledger = new LedgerStore(db);
+    const { app, accounts, entitlements, quota } = setup({}, { ledger });
+    const cookie = await login(app);
+    expect((await post(app, chatBody(), cookie)).status).toBe(200);
+    entitlements.grant('dev:테스터', 'free', null, null, 'x', 0);
+    expect((await postJson(app, '/api/account/delete', cookie, { confirm: '삭제' })).status).toBe(400);
+    expect((await postJson(app, '/api/account/delete', cookie, { confirm: ACCOUNT_DELETE_CONFIRM })).status).toBe(200);
+    expect(accounts.get('dev:테스터')).toMatchObject({ name: null, email: null, deletedAt: NOW.getTime() });
+    expect((await post(app, chatBody(), cookie)).status).toBe(401);
+    expect(db.prepare('SELECT user_id FROM ai_events').all()).toEqual([{ user_id: deletedAlias('dev:테스터', ctxSecret()) }]);
+    expect(entitlements.override('dev:테스터')).toBeNull();
+    // 사용 횟수는 남겨 같은 날 다시 가입해도 한도가 되돌아가지 않는다
+    const again = await login(app);
+    expect(quota.used('dev:테스터', '2026-10-01')).toBe(1);
+    expect((await me(app, again)).authenticated).toBe(true);
+  });
+});
+
 describe('요금제와 한도', () => {
   const lim = (over: Record<string, unknown> = {}) => ({ aiRequestsPerDay: 2, aiRequestsPerMonth: null, aiMaxDocChars: 120_000, aiCostCapMicroUsdPerMonth: null, ...over });
   const plansFile = (free: Record<string, unknown> = {}) =>
@@ -468,6 +509,7 @@ describe('요금제와 한도', () => {
       quota: new QuotaStore(db),
       accounts: new AccountStore(db),
       entitlements: new EntitlementStore(db, config),
+      audit: new AuditLog(db),
       providers: { chat: new MockProvider(), format_check: new MockProvider() },
       now: () => NOW,
       log: () => undefined,

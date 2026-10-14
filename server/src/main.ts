@@ -4,6 +4,7 @@ import { createApp } from './app';
 import { createProviders } from './ai/providers';
 import { ConfigError, loadConfig } from './config';
 import { loadDotEnv } from './dotenv';
+import { AuditLog } from './audit';
 import { AccountStore } from './auth/accounts';
 import { EntitlementStore } from './billing/entitlements';
 import { openDb } from './db';
@@ -34,7 +35,8 @@ const entitlements = new EntitlementStore(db, config);
 // AI 사용량 원장. 원가 집계에 쓰므로 지우지 않는다(보고: server/dist/ledger-report.js).
 const ledger = new LedgerStore(db);
 const providers = createProviders(config);
-const app = createApp({ config, quota, accounts, entitlements, providers, ledger });
+const audit = new AuditLog(db);
+const app = createApp({ config, quota, accounts, entitlements, audit, providers, ledger });
 
 // 지난 사용 기록은 62일 뒤에 지운다(요금제의 월 한도를 계산하려면 이번 달 기록이 있어야 한다).
 const prune = () => {
