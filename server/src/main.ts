@@ -6,6 +6,7 @@ import { ConfigError, loadConfig } from './config';
 import { loadDotEnv } from './dotenv';
 import { AuditLog } from './audit';
 import { AccountStore } from './auth/accounts';
+import { backupOnce } from './backup';
 import { EntitlementStore } from './billing/entitlements';
 import { openDb } from './db';
 import { LedgerStore } from './ledger';
@@ -47,11 +48,26 @@ prune();
 const pruneTimer = setInterval(prune, 6 * 3_600_000);
 pruneTimer.unref();
 
+// 하루 한 번 데이터 파일 스냅숏(서버를 켤 때와 그 뒤 한 시간마다 "오늘 것이 있는지" 확인한다).
+const backup = () => {
+  if (config.backup.keep === 0) return;
+  try {
+    const r = backupOnce(db, config.backup.dir, dayKey(new Date(), config.timezone), config.backup.keep);
+    if (r.created) console.log(`백업을 만들었어요: ${r.file}${r.removed.length ? ` (오래된 ${r.removed.length}개 지움)` : ''}`);
+  } catch (e) {
+    console.error(`백업하지 못했어요: ${e instanceof Error ? e.message : String(e)}`);
+  }
+};
+backup();
+const backupTimer = setInterval(backup, 3_600_000);
+backupTimer.unref();
+
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`서버가 ${config.publicUrl} (포트 ${info.port})에서 실행 중입니다.`);
   const plan = config.plans.list.find((p) => p.id === config.plans.defaultPlanId);
   const perDay = plan?.limits.aiRequestsPerDay;
   console.log(`로그인 방식: ${config.authMode} · 기본 요금제: ${config.authMode === 'none' ? '없음(한도 없음)' : `${plan?.name} · 하루 AI ${perDay === null ? '제한 없음' : `${perDay}회`}`} (${config.timezone})`);
+  console.log(config.backup.keep === 0 ? '백업: 꺼짐(BACKUP_KEEP=0)' : `백업: 하루 한 번 ${config.backup.dir} (최근 ${config.backup.keep}개)`);
   if (config.aiDailyBudgetMicroUsd !== null) console.log(`AI 전체 하루 비용 상한: $${config.aiDailyBudgetMicroUsd / 1_000_000}`);
   for (const mode of ['chat', 'format_check'] as const) {
     const p = providers[mode];

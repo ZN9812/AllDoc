@@ -14,7 +14,8 @@
 ```
 shared/  웹·서버 공용 타입과 zod 스키마 (문단 위치 CellPlace·AreaPlace, 변경 Op, textGuard)
 web/     React 19 + Vite + vitest. 문서 엔진 web/src/engines/{hwp,docx,...}, 화면 web/src/editor
-server/  Hono. 로그인·하루 한도·AI 중계. AI 프롬프트와 데모 AI 는 server/src/ai/{prompt,mock}.ts
+server/  Hono. 로그인·계정·요금제 한도·AI 중계·원장. SQLite 는 server/src/db(번호 붙은 마이그레이션), 관리자 도구 server/src/admin.ts.
+         AI 프롬프트와 데모 AI 는 server/src/ai/{prompt,mock}.ts
 e2e/     Playwright. 빌드한 서버(포트 8799, AUTH_MODE=dev, AI_PROVIDER=mock)에 붙는다
 ```
 - 한글은 rhwp(`@rhwp/core` 코어 + 자체 호스팅한 편집기 rhwp-studio), Word 는 SuperDoc 이다. SuperDoc 의 독점 DOCX 엔진 라이선스는 README·`THIRD_PARTY_NOTICES.md` 를 보고, `VITE_DISABLE_DOCX=1` 로 Word 지원을 끌 수 있다.
@@ -28,7 +29,7 @@ RHWP_STUDIO_STRICT=1 npm run build       # 처음 한 번 GitHub 에서 rhwp-stu
 REQUIRE_HWP_SAMPLES=1 npm test -w web -- src/engines/hwp/corpus.test.ts   # 예제 문서 대조(빌드 뒤)
 npx playwright test e2e/<파일> --project=desktop                          # 종단 시험(빌드 뒤)
 ```
-- 종단 시험은 8799 포트에 남은 옛 서버를 재사용하므로, 다시 빌드한 뒤에는 `pkill -f "[s]erver/dist/main.js"` 로 끄고 돌린다. `PW_CHROMIUM_PATH` 로 크로미움을 지정할 수 있다. `REQUIRE_SOFFICE=1`(LibreOffice 필수)·`REQUIRE_HWP_SAMPLES=1` 이면 건너뛰지 않고 실패한다.
+- 종단 시험은 서버 두 개를 띄운다: 8799(기본)와 8798(약관 동의를 켠 서버, `e2e/terms.spec.ts` 만). 8799 포트에 남은 옛 서버를 재사용하므로, 다시 빌드한 뒤에는 `pkill -f "[s]erver/dist/main.js"` 로 끄고 돌린다. `PW_CHROMIUM_PATH` 로 크로미움을 지정할 수 있다. `REQUIRE_SOFFICE=1`(LibreOffice 필수)·`REQUIRE_HWP_SAMPLES=1` 이면 건너뛰지 않고 실패한다.
 - **큰 변경을 푸시하기 전 전체 검증**(CI 와 같다. 약 10분): typecheck → `npm test` → `RHWP_STUDIO_STRICT=1 npm run build` → corpus 시험 → `npm run check:licenses` → `REQUIRE_SOFFICE=1 REQUIRE_HWP_SAMPLES=1 npx playwright test` →
   `VITE_DISABLE_DOCX=1 npm run build` 후 `VITE_DISABLE_DOCX=1 npx playwright test e2e/docx-disabled.spec.ts e2e/home.spec.ts --project=desktop` → 일반 빌드로 되돌리기. 검증하는 동안에는 소스와 시험을 고치지 않는다(빌드가 섞인다).
 - 푸시 뒤에는 CI(`.github/workflows/ci.yml`: test, no-docx, docker)가 통과하는지 확인한다.

@@ -50,6 +50,8 @@ export interface Config {
   google: { clientId: string; clientSecret: string } | null;
   timezone: string;
   dataDir: string;
+  /** 하루 한 번 스냅숏을 둘 폴더(기본 DATA_DIR/backups)와 남길 개수(0 이면 백업하지 않음) */
+  backup: { dir: string; keep: number };
   webDist: string;
   allowedOrigins: string[];
   ai: Record<AiMode, AiTaskSettings>;
@@ -90,6 +92,8 @@ const EnvSchema = z.object({
   TERMS_URL: z.url().optional(),
   PRIVACY_URL: z.url().optional(),
   DATA_DIR: z.string().default('./data'),
+  BACKUP_DIR: z.string().optional(),
+  BACKUP_KEEP: z.coerce.number().int().min(0).max(3650).default(14),
   WEB_DIST: z.string().optional(),
   ALLOWED_ORIGINS: z.string().optional(),
 });
@@ -289,6 +293,7 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
     google,
     timezone: env.APP_TIMEZONE,
     dataDir: resolve(env.DATA_DIR),
+    backup: { dir: resolve(env.BACKUP_DIR ?? resolve(env.DATA_DIR, 'backups')), keep: env.BACKUP_KEEP },
     webDist: resolve(env.WEB_DIST ?? resolve(deps.moduleDir, '../../web/dist')),
     allowedOrigins: [...origins],
     ai,

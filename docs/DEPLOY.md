@@ -24,24 +24,35 @@
 | `AI_PROVIDER` | 아니오 | `anthropic`(기본) · `mock`(데모) · `off`. 자세한 내용은 [AI.md](AI.md) |
 | `ANTHROPIC_API_KEY` | `anthropic`일 때 | 서버에만 둡니다. |
 | `AI_CONFIG_PATH` | 아니오 | 작업별 모델·시스템 프롬프트 설정 파일(JSON). [AI.md](AI.md) |
-| `DAILY_AI_LIMIT` | 아니오 | 사용자별 하루 AI 요청 수(기본 5) |
+| `DAILY_AI_LIMIT` | 아니오 | 사용자별 하루 AI 요청 수(기본 5). `PLANS_CONFIG_PATH` 가 없을 때 기본 요금제(free)의 하루 한도가 됩니다. |
+| `PLANS_CONFIG_PATH` | 아니오 | 요금제 파일(JSON). 아래 "요금제와 관리자 도구" |
+| `AI_DAILY_BUDGET_USD` | 아니오 | 전체 사용자의 하루 AI 원가 상한(달러). 원장 기준으로 넘으면 그날은 AI 요청을 모두 503 으로 멈춥니다. Anthropic 콘솔의 월 지출 한도와 함께 쓰세요. |
+| `TERMS_VERSION`, `TERMS_URL`, `PRIVACY_URL` | 아니오 | 약관 판과 이용약관·개인정보처리방침 주소. 판을 넣으면 로그인한 사용자가 그 판에 동의(만 14세 이상 확인 포함)해야 AI 를 쓸 수 있고, 판을 바꾸면 다시 묻습니다. 판을 넣으면 두 주소도 있어야 합니다. |
+| `BACKUP_DIR`, `BACKUP_KEEP` | 아니오 | 하루 한 번 데이터 파일 스냅숏을 둘 폴더(기본 `DATA_DIR/backups`)와 남길 개수(기본 14, `0` 이면 끔). 아래 "백업" |
 | `APP_TIMEZONE` | 아니오 | 하루가 바뀌는 시간대(기본 `Asia/Seoul`) |
 | `PORT` | 아니오 | 서버가 듣는 포트(기본 8787). Docker에서는 그대로 두고 바깥 포트만 바꾸는 편이 쉽습니다. |
-| `DATA_DIR` | 아니오 | SQLite(사용 횟수, AI 사용량 원장)를 둘 폴더. 이미지 안에서는 `/data` |
+| `DATA_DIR` | 아니오 | SQLite(계정, 사용 횟수, AI 사용량 원장, 요금제 부여, 관리 기록)를 둘 폴더. 이미지 안에서는 `/data` |
 | `ALLOWED_ORIGINS` | 아니오 | `PUBLIC_URL` 외에 요청을 받아들일 출처(쉼표로 구분). 보통 필요 없습니다. |
 
 설정이 잘못되면 서버가 켜질 때 무엇이 문제인지 한국어로 알려 주고 멈춥니다.
 
 ## 구글 로그인 설정
 
-로그인은 AI 사용 횟수를 사용자별로 관리하려는 용도로만 씁니다(문서는 로그인과 상관없이 브라우저에만 저장됩니다).
+로그인은 AI 사용 횟수와 요금제를 사용자별로 관리하려는 용도로만 씁니다(문서는 로그인과 상관없이 브라우저에만 저장됩니다).
 
 1. [Google Cloud Console](https://console.cloud.google.com/)에서 프로젝트를 만들고 "API 및 서비스 → OAuth 동의 화면"을 설정합니다.
 2. "사용자 인증 정보 → OAuth 클라이언트 ID 만들기 → 웹 애플리케이션"을 고릅니다.
 3. **승인된 리디렉션 URI**에 `{PUBLIC_URL}/api/auth/callback`을 넣습니다(예: `https://docs.example.com/api/auth/callback`).
 4. 발급된 클라이언트 ID와 보안 비밀을 `.env`의 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`에 넣습니다.
 
-서버는 인증 코드 방식(PKCE 포함)으로 로그인하고, 이름·이메일은 세션 쿠키에만 담습니다. 서버 저장소에는 사용자 번호와 날짜별 사용 횟수, AI 요청별 사용량(토큰·원가·모델, 문서 글은 없음. [AI.md](AI.md))만 남습니다.
+서버는 인증 코드 방식(PKCE 포함)으로 로그인합니다. 서버 저장소(SQLite)에는 다음이 남습니다.
+- **계정**: 사용자 번호(구글 계정 식별값), 이름·이메일, 가입·마지막 로그인 시각, 상태(차단 여부), 약관 동의 판·시각
+- 날짜별 AI 사용 횟수(62일 보관), AI 요청별 사용량(토큰·원가·모델, 문서 글은 없음. [AI.md](AI.md)), 관리자가 준 요금제, 관리 기록
+
+세션 쿠키는 서명만 하고 서버에 목록을 두지 않지만, 요청마다 계정을 한 번 조회해 탈퇴·차단·"모든 기기에서 로그아웃"을 바로 반영합니다(쿠키 안의 세션 버전이 계정의 버전과 달라지면 무효).
+**이 기능이 들어간 판으로 올리면 그 전에 받은 쿠키는 모두 무효가 되어 사용자가 한 번 다시 로그인해야 합니다.**
+
+계정을 지우면(설정 → 계정 → 계정 삭제, 또는 관리자 도구) 이름·이메일을 지우고 모든 쿠키를 무효로 하며, 원장의 사용자 번호를 되돌릴 수 없는 가명으로 바꿉니다. 날짜별 사용 횟수는 같은 계정으로 다시 가입해 한도를 되돌리지 못하도록 남겨 두고 62일 뒤 지웁니다. 백업 스냅숏에는 보관 기간(기본 14일) 동안 남습니다.
 
 ## Docker로 실행
 
@@ -74,8 +85,36 @@ docker compose up -d --build
 
 ### 백업
 
-사용 횟수는 하루가 지나면 의미가 없지만, 같은 파일의 AI 사용량 원장(`ai_events`)은 가격을 정하는 근거라 잃으면 다시 모을 수 없습니다. 옮기거나 보관하려면 볼륨의 `alldoc.sqlite*` 파일을 서버를 멈춘 상태에서 복사하세요.
+데이터 파일에는 계정·요금제 부여·AI 사용량 원장(가격을 정하는 근거)이 들어 있어 잃으면 다시 만들 수 없습니다.
+- 서버가 **하루 한 번** 스냅숏을 만듭니다: `BACKUP_DIR`(기본 `/data/backups`)의 `alldoc-YYYY-MM-DD.sqlite`, 최근 `BACKUP_KEEP`(기본 14)개. 서버를 켤 때와 그 뒤 한 시간마다 "오늘 것이 있는지" 보고 없으면 만듭니다(SQLite `VACUUM INTO`, 서버를 멈추지 않음).
+- **스냅숏은 같은 디스크에 있으므로, 서버 밖으로 복사하는 일은 직접 하세요**(예: restic·rclone 으로 `/data/backups` 를 다른 곳에 매일 복사). 같은 볼륨만으로는 디스크 고장에 대비할 수 없습니다.
+- **되살리기**: 서버를 멈추고 → 데이터 폴더의 `alldoc.sqlite`, `alldoc.sqlite-wal`, `alldoc.sqlite-shm` 을 다른 곳으로 옮긴 뒤 → 원하는 스냅숏을 `alldoc.sqlite` 이름으로 복사하고 → 서버를 켭니다. 스냅숏 이후의 기록(사용 횟수·원장)은 사라집니다.
+- **복구 훈련 기록**(2026-10-14, 이 저장소의 빌드한 서버로 개발 환경에서 한 번 해 본 것이며 CI 에서는 돌지 않는다): 개발용 로그인으로 계정을 만들고 데모 AI 요청 1건과 관리자 요금제 부여 1건을 남김 → 서버를 다시 켜 스냅숏 생성 → 데이터 폴더를 옮겨 "잃은" 상태로 만듦 → 스냅숏을 복사해 서버를 켬(되살려 다시 띄우는 데 약 0.35초) → 옛 쿠키로 로그인 상태, 수동 부여 요금제, 오늘 사용 1회, 원장 1건, 관리 기록 1건이 모두 남아 있음을 확인. Docker 볼륨과 서버 밖 복사는 이 훈련에 들어 있지 않습니다.
+
 **사용자의 문서는 서버에 없습니다.** 각자의 브라우저에 있으므로 서버 백업으로는 복구되지 않습니다(사용자가 "내려받기"로 보관해야 합니다).
+
+### 요금제와 관리자 도구
+
+결제는 아직 없습니다. 요금제는 파일로 정하고, 관리자가 사용자에게 수동으로 줍니다(베타 시험자 등).
+
+```json
+{
+  "default": "free",
+  "plans": [
+    { "id": "free", "name": "무료", "limits": { "aiRequestsPerDay": 5, "aiRequestsPerMonth": 60, "aiMaxDocChars": 60000, "aiCostCapMicroUsdPerMonth": 3000000 } },
+    { "id": "pro", "name": "프로", "limits": { "aiRequestsPerDay": null, "aiRequestsPerMonth": 600, "aiMaxDocChars": 120000, "aiCostCapMicroUsdPerMonth": 30000000 } }
+  ]
+}
+```
+- `null` 은 제한 없음입니다. `aiMaxDocChars` 는 120,000 이하, `aiCostCapMicroUsdPerMonth` 는 한 사용자의 한 달 AI 원가 상한(마이크로달러, 3000000 = $3)이며 화면에 알리지 않는 안전 장치입니다. 위 숫자는 형식을 보이려는 예시이고 정한 가격·한도가 아닙니다.
+- 파일이 잘못되면(기본 요금제가 없음, id 가 겹침, 모르는 항목) 서버가 켜질 때 알려 주고 멈춥니다. compose 에서는 `./plans.json:/config/plans.json:ro` 로 붙이고 `PLANS_CONFIG_PATH=/config/plans.json` 을 적습니다.
+- 관리자 도구(같은 설정·데이터 폴더로 실행. 바꾸는 명령은 모두 관리 기록에 남습니다):
+
+```bash
+docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/admin.js user someone@example.com
+docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/admin.js grant g:1234 pro --days 30 --note 베타
+# 그 밖에: plans · revoke · ban · unban · logout-all · role · delete --yes · audit
+```
 
 ## 역방향 프록시(HTTPS)
 
@@ -151,9 +190,11 @@ docker build --build-arg VITE_DISABLE_DOCX=1 -t alldoc .
 
 - [ ] **SuperDoc 독점 엔진 라이선스를 확인했다**(또는 Word 지원을 끄고 배포한다). [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)
 - [ ] 이름과 로고를 정했다. "AllDoc"은 임시 이름이고 비슷한 이름의 앱이 있습니다. 상표와 도메인을 확인하세요(`web/src/brand/`).
-- [ ] 개인정보 처리 방침을 만들었다. 이 서비스는 로그인한 사용자의 이름·이메일을 세션 쿠키에, 사용자 번호와 날짜별 AI 사용 횟수, AI 요청별 사용량 기록(토큰·원가, 문서 글 없음)을 서버에 둡니다. AI를 쓰면 **문서의 글이 AI 서비스(Anthropic)로 전송**됩니다(처음 쓸 때 동의 창으로 알립니다). 법적 고지 문구는 직접 검토하세요.
+- [ ] 개인정보 처리 방침을 만들었다. 이 서비스는 로그인한 사용자의 계정(구글 계정 식별값·이름·이메일·약관 동의)과 날짜별 AI 사용 횟수, AI 요청별 사용량 기록(토큰·원가, 문서 글 없음)을 서버에 두고, 백업 스냅숏에 보관 기간 동안 남깁니다(위 "구글 로그인 설정"과 "백업"). AI를 쓰면 **문서의 글이 AI 서비스(Anthropic)로 전송**됩니다(처음 쓸 때 동의 창으로 알립니다). 법적 고지 문구는 직접 검토하세요.
 - [ ] 실제 API 키로 "AI 대화"와 "내 규칙"을 한 번씩 돌려 보고, 서버 기록에 경고가 없는지 확인했다. 이 저장소의 시험은 가짜 AI·가짜 클라이언트로만 돌았습니다([AI.md](AI.md)).
-- [ ] Anthropic 콘솔에 월 지출 한도를 걸었고, `DAILY_AI_LIMIT`을 정했다.
+- [ ] Anthropic 콘솔에 월 지출 한도를 걸었고, 요금제 한도(`DAILY_AI_LIMIT` 또는 `PLANS_CONFIG_PATH`)와 `AI_DAILY_BUDGET_USD` 를 정했다.
+- [ ] 서버 밖 백업 복사를 설정했고, 스냅숏으로 되살리는 훈련을 한 번 했다.
+- [ ] 약관 동의를 받는다면 `TERMS_VERSION`·`TERMS_URL`·`PRIVACY_URL` 을 넣었다(약관 본문은 법률 검토 필요).
 - [ ] 구글 로그인을 실제 도메인에서 끝까지 해 봤다(로그인 → AI 사용 → 로그아웃).
 - [ ] HTTPS이고, `SESSION_SECRET`이 충분히 긴 무작위 값이다.
 - [ ] 한글(HWP·HWPX)·Word 문서를 **실제 업무 파일**로 열고, 고치고, 내려받아 한글·Word에서 다시 열어 보았다(아래 한계 참고).

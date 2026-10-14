@@ -161,6 +161,13 @@ describe('요금제 설정', () => {
     expect(problemsOf(() => load({ default: 'free', plans: [{ ...plan('free'), extra: 1 }] })).length).toBeGreaterThan(0);
   });
 
+  it('백업은 기본으로 DATA_DIR/backups 에 14개, BACKUP_KEEP=0 이면 끈다', () => {
+    const plans = { default: 'free', plans: [plan('free')] };
+    expect(load(plans, { DATA_DIR: '/srv/data' }).backup).toEqual({ dir: '/srv/data/backups', keep: 14 });
+    expect(load(plans, { BACKUP_DIR: '/mnt/bk', BACKUP_KEEP: '0' }).backup).toEqual({ dir: '/mnt/bk', keep: 0 });
+    expect(problemsOf(() => load(plans, { BACKUP_KEEP: '-1' })).length).toBeGreaterThan(0);
+  });
+
   it('전체 하루 비용 상한은 마이크로달러로, 약관 판은 주소와 함께 읽는다', () => {
     const terms = { TERMS_VERSION: '2026-10', TERMS_URL: 'https://example.com/terms', PRIVACY_URL: 'https://example.com/privacy' };
     const c = load({ default: 'free', plans: [plan('free')] }, { AI_DAILY_BUDGET_USD: '12.5', ...terms });
