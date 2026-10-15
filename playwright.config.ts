@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { LAUNCH_ENV, LAUNCH_PORT } from './e2e/launch-env';
 
 const PORT = 8799;
 /** 약관 동의(TERMS_VERSION)를 켠 두 번째 서버. e2e/terms.spec.ts 만 여기에 붙는다. */
@@ -40,12 +41,18 @@ export default defineConfig({
     },
   },
   projects: [
-    { name: 'desktop', testIgnore: [/\.phone\.spec\.ts$/, /terms\.spec\.ts$/, /tex-real\.spec\.ts$/], use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
+    { name: 'desktop', testIgnore: [/\.phone\.spec\.ts$/, /terms\.spec\.ts$/, /tex-real\.spec\.ts$/, /launch\.spec\.ts$/], use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
     { name: 'phone', testMatch: /\.phone\.spec\.ts$/, use: { ...devices['Pixel 7'] } },
     {
       name: 'terms',
       testMatch: /terms\.spec\.ts$/,
       use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 }, baseURL: `http://localhost:${TERMS_PORT}` },
+    },
+    {
+      // 비공개 베타·하단 사업자 정보·정책 문서를 켠 서버(e2e/launch-env.ts)
+      name: 'launch',
+      testMatch: /launch\.spec\.ts$/,
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 }, baseURL: `http://localhost:${LAUNCH_PORT}` },
     },
     {
       name: 'tex-real',
@@ -76,6 +83,13 @@ export default defineConfig({
         TERMS_URL: 'https://example.com/terms',
         PRIVACY_URL: 'https://example.com/privacy',
       },
+    },
+    {
+      command: 'node --disable-warning=ExperimentalWarning server/dist/main.js',
+      url: `http://localhost:${LAUNCH_PORT}/api/health`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+      env: LAUNCH_ENV,
     },
     ...(TEX_REAL
       ? [

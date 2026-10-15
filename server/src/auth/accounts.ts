@@ -19,6 +19,8 @@ export interface Account {
   agreedAt: number | null;
   age14Confirmed: boolean;
   deletedAt: number | null;
+  /** 비공개 베타에 들어온 초대(invites.id). 초대 없이 만든 계정이나 초대를 거둔 계정은 null */
+  inviteId: number | null;
 }
 
 interface Row {
@@ -34,6 +36,7 @@ interface Row {
   agreed_at: number | null;
   age14_confirmed: number | null;
   deleted_at: number | null;
+  invite_id: number | null;
 }
 
 const toAccount = (r: Row): Account => ({
@@ -49,6 +52,7 @@ const toAccount = (r: Row): Account => ({
   agreedAt: r.agreed_at,
   age14Confirmed: r.age14_confirmed === 1,
   deletedAt: r.deleted_at,
+  inviteId: r.invite_id ?? null,
 });
 
 export class AccountStore {

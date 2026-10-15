@@ -7,6 +7,7 @@ import { ConfigError, loadConfig } from './config';
 import { loadDotEnv } from './dotenv';
 import { AuditLog } from './audit';
 import { AccountStore } from './auth/accounts';
+import { InviteStore } from './auth/invites';
 import { backupOnce } from './backup';
 import { EntitlementStore } from './billing/entitlements';
 import { openDb } from './db';
@@ -43,7 +44,8 @@ const audit = new AuditLog(db);
 // LaTeX 컴파일(COMPILER=mock|http). 컴파일하려고 올린 파일은 DATA_DIR/tex 에 두고 보관 기간 뒤 지운다.
 const tex = config.compiler ? new TexStore(db, config.dataDir) : undefined;
 const compiler = !config.compiler ? undefined : config.compiler.mode === 'mock' ? new MockCompilerClient() : new HttpCompilerClient(config.compiler.urls, config.compiler.secret);
-const app = createApp({ config, quota, accounts, entitlements, audit, providers, ledger, compiler, tex });
+const invites = new InviteStore(db);
+const app = createApp({ config, quota, accounts, entitlements, audit, invites, providers, ledger, compiler, tex });
 
 // 지난 사용 기록은 62일 뒤에 지운다(요금제의 월 한도를 계산하려면 이번 달 기록이 있어야 한다).
 const prune = () => {
@@ -82,6 +84,7 @@ const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   const plan = config.plans.list.find((p) => p.id === config.plans.defaultPlanId);
   const perDay = plan?.limits.aiRequestsPerDay;
   console.log(`로그인 방식: ${config.authMode} · 기본 요금제: ${config.authMode === 'none' ? '없음(한도 없음)' : `${plan?.name} · 하루 AI ${perDay === null ? '제한 없음' : `${perDay}회`}`} (${config.timezone})`);
+  if (config.beta) console.log('비공개 베타: 초대받은 사람만 로그인할 수 있어요(BETA_MODE=invite). 초대는 admin.js invite 로 관리해요.');
   console.log(config.backup.keep === 0 ? '백업: 꺼짐(BACKUP_KEEP=0)' : `백업: 하루 한 번 ${config.backup.dir} (최근 ${config.backup.keep}개)`);
   console.log(
     config.compiler

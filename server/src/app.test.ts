@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ACCOUNT_DELETE_CONFIRM, type AiRequest, type AiResponse, type ErrorResponse, type MeResponse } from '@alldoc/shared';
+import { ACCOUNT_DELETE_CONFIRM, type AiRequest, type AiResponse, type ErrorResponse, type MeResponse, type PolicyResponse, type SiteInfo } from '@alldoc/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp, type AppDeps } from './app';
 import { MockProvider } from './ai/mock';
@@ -9,6 +9,7 @@ import { ProviderFailedError, ProviderRefusedError, type AiProvider, type Provid
 import { AuditLog } from './audit';
 import { deletedAlias } from './auth/deletion';
 import { AccountStore } from './auth/accounts';
+import { InviteStore } from './auth/invites';
 import { EntitlementStore } from './billing/entitlements';
 import { openDb } from './db';
 import { LedgerStore } from './ledger';
@@ -33,19 +34,22 @@ function setup(env: Record<string, string> = {}, over: Partial<AppDeps> = {}) {
   const accounts = new AccountStore(db);
   const entitlements = new EntitlementStore(db, config);
   const provider = new MockProvider();
+  const invites = new InviteStore(db);
+  const audit = new AuditLog(db);
   const deps: AppDeps = {
     config,
     quota,
     accounts,
     entitlements,
-    audit: new AuditLog(db),
+    audit,
+    invites,
     providers: { chat: provider, format_check: provider, tex_chat: provider, tex_fix: provider },
     now: () => NOW,
     log: () => undefined,
     ...over,
   };
   const app = createApp(deps);
-  return { app, quota, accounts, entitlements, db, config, deps };
+  return { app, quota, accounts, entitlements, invites, audit, db, config, deps };
 }
 
 type App = ReturnType<typeof setup>['app'];
@@ -690,5 +694,163 @@ describe('AI 사용량 원장 기록', () => {
     const { app } = setup({}, { ledger, log });
     expect((await post(app, chatBody(), await login(app))).status).toBe(200);
     expect(log.mock.calls.some(([m]) => m === 'AI 원장 기록 실패')).toBe(true);
+  });
+});
+
+describe('비공개 베타(BETA_MODE=invite)', () => {
+  const me = async (app: App, cookie: string) => (await (await app.request('/api/me', { headers: { cookie } })).json()) as MeResponse;
+  const devLogin = (app: App, user: string, invite?: string) =>
+    app.request(`/api/auth/login?user=${encodeURIComponent(user)}&next=/docs${invite ? `&invite=${encodeURIComponent(invite)}` : ''}`);
+  const cookieOf = (res: Response) => (res.headers.getSetCookie().find((c) => c.startsWith('alldoc_session=')) ?? '').split(';')[0] as string;
+  const opts = { expiresAt: null, note: null, actor: '시험', now: NOW.getTime() };
+
+  it('기본값(꺼짐)에서는 초대 없이 로그인된다', async () => {
+    const { app, config } = setup();
+    expect(config.beta).toBe(false);
+    const res = await devLogin(app, '아무나');
+    expect(res.headers.get('location')).toBe('/docs');
+    expect(((await (await app.request('/api/site')).json()) as SiteInfo).beta).toBe(false);
+  });
+
+  it('초대가 없으면 로그인되지 않고 계정 행도 만들지 않는다', async () => {
+    const { app, accounts } = setup({ BETA_MODE: 'invite' });
+    const res = await devLogin(app, '손님');
+    expect(res.headers.get('location')).toBe('/?login=invite');
+    expect(cookieOf(res)).toBe('');
+    expect(accounts.get('dev:손님')).toBeNull();
+    const wrong = await devLogin(app, '손님', 'NOPE-NOPE');
+    expect(wrong.headers.get('location')).toBe('/?login=invite');
+    expect(((await (await app.request('/api/site')).json()) as SiteInfo).beta).toBe(true);
+  });
+
+  it('초대 코드로 들어오면 다음부터는 코드 없이 로그인되고, 횟수를 다 쓴 코드는 더 못 쓴다', async () => {
+    const { app, invites, accounts, audit } = setup({ BETA_MODE: 'invite' });
+    const inv = invites.addCode('beta-0001', { ...opts, maxUses: 1 });
+    expect(inv.value).toBe('BETA0001');
+    const first = await devLogin(app, '갑', 'beta 0001');
+    expect(first.headers.get('location')).toBe('/docs');
+    expect((await me(app, cookieOf(first))).authenticated).toBe(true);
+    expect(accounts.get('dev:갑')?.inviteId).toBe(inv.id);
+    expect(audit.recent('dev:갑')[0]?.action).toBe('beta.admit');
+    // 다시 로그인할 때는 코드가 없어도 된다
+    expect((await devLogin(app, '갑')).headers.get('location')).toBe('/docs');
+    // 1회짜리 코드라 다른 사람은 못 쓴다
+    expect((await devLogin(app, '을', 'BETA0001')).headers.get('location')).toBe('/?login=invite');
+    expect(invites.get(inv.id)?.uses).toBe(1);
+  });
+
+  it('만료한 코드와 거둔 코드는 쓸 수 없다', async () => {
+    const { app, invites } = setup({ BETA_MODE: 'invite' });
+    invites.addCode('EXPIRED01', { ...opts, maxUses: null, expiresAt: NOW.getTime() - 1 });
+    const revoked = invites.addCode('REVOKED01', { ...opts, maxUses: null });
+    invites.revoke(revoked.id, NOW.getTime());
+    expect((await devLogin(app, '병', 'EXPIRED01')).headers.get('location')).toBe('/?login=invite');
+    expect((await devLogin(app, '병', 'REVOKED01')).headers.get('location')).toBe('/?login=invite');
+  });
+
+  it('초대를 거두면 그 초대로 들어온 계정의 쿠키가 다음 요청부터 무효다', async () => {
+    const { app, invites } = setup({ BETA_MODE: 'invite' });
+    const inv = invites.addCode('GROUP0001', { ...opts, maxUses: null });
+    const cookie = cookieOf(await devLogin(app, '정', 'GROUP0001'));
+    expect((await me(app, cookie)).authenticated).toBe(true);
+    expect(invites.revoke(inv.id, NOW.getTime())).toEqual(['dev:정']);
+    expect((await me(app, cookie)).authenticated).toBe(false);
+    expect((await post(app, chatBody(), cookie)).status).toBe(401);
+    expect((await devLogin(app, '정')).headers.get('location')).toBe('/?login=invite');
+  });
+
+  it('베타를 켜기 전에 만든 계정은 초대가 있어야 하고, 관리자 역할은 초대 없이 들어온다', async () => {
+    const { app, accounts } = setup({ BETA_MODE: 'invite' });
+    accounts.login({ id: 'dev:옛사용자', name: '옛사용자', email: null }, NOW.getTime());
+    accounts.login({ id: 'dev:운영자', name: '운영자', email: null }, NOW.getTime());
+    accounts.setRole('dev:운영자', 'admin');
+    expect((await devLogin(app, '옛사용자')).headers.get('location')).toBe('/?login=invite');
+    const admin = await devLogin(app, '운영자');
+    expect(admin.headers.get('location')).toBe('/docs');
+    expect((await me(app, cookieOf(admin))).authenticated).toBe(true);
+  });
+
+  it('차단한 계정은 맞는 코드가 있어도 막히고 코드를 쓰지 않는다', async () => {
+    const { app, invites, accounts } = setup({ BETA_MODE: 'invite' });
+    accounts.login({ id: 'dev:무', name: '무', email: null }, NOW.getTime());
+    accounts.setStatus('dev:무', 'banned');
+    const inv = invites.addCode('BANNED001', { ...opts, maxUses: 1 });
+    expect((await devLogin(app, '무', 'BANNED001')).headers.get('location')).toBe('/?login=blocked');
+    expect(invites.get(inv.id)?.uses).toBe(0);
+  });
+
+  describe('구글 로그인', () => {
+    const env = { AUTH_MODE: 'google', GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'csecret', PUBLIC_URL: 'https://docs.example.com', BETA_MODE: 'invite' };
+    const google = (info: Record<string, unknown>) =>
+      vi.fn(async (url: string | URL | Request) => (String(url).includes('/token') ? Response.json({ access_token: 'at' }) : Response.json(info)));
+    async function roundTrip(app: App, invite?: string) {
+      const start = await app.request(`/api/auth/login?next=/docs${invite ? `&invite=${invite}` : ''}`);
+      const state = new URL(start.headers.get('location') as string).searchParams.get('state') as string;
+      const oauthCookie = (start.headers.get('set-cookie') as string).split(';')[0] as string;
+      return app.request(`/api/auth/callback?code=abc&state=${state}`, { headers: { cookie: oauthCookie } });
+    }
+
+    it('허용 목록의 이메일(구글이 확인한 것)이면 들어온다. 대소문자는 가리지 않는다', async () => {
+      const f = google({ sub: '77', name: '초대손님', email: 'Guest@Example.com', email_verified: true });
+      const { app, invites, accounts } = setup(env, { fetch: f as unknown as typeof fetch });
+      const inv = invites.addEmail('guest@example.com', opts);
+      const res = await roundTrip(app);
+      expect(res.headers.get('location')).toBe('/docs');
+      expect(accounts.get('g:77')?.inviteId).toBe(inv.id);
+    });
+
+    it('구글이 확인하지 않은 이메일은 허용 목록과 대조하지 않는다', async () => {
+      const f = google({ sub: '78', name: '미확인', email: 'guest@example.com', email_verified: false });
+      const { app, invites, accounts } = setup(env, { fetch: f as unknown as typeof fetch });
+      invites.addEmail('guest@example.com', opts);
+      expect((await roundTrip(app)).headers.get('location')).toBe('/?login=invite');
+      expect(accounts.get('g:78')).toBeNull();
+    });
+
+    it('초대 코드는 구글을 다녀오는 동안 서명한 쿠키에 담겨 쓰인다', async () => {
+      const f = google({ sub: '79', name: '코드손님', email: 'other@example.com', email_verified: true });
+      const { app, invites, accounts } = setup(env, { fetch: f as unknown as typeof fetch });
+      const inv = invites.addCode('GOOGLE001', { ...opts, maxUses: null });
+      expect((await roundTrip(app, 'google-001')).headers.get('location')).toBe('/docs');
+      expect(accounts.get('g:79')?.inviteId).toBe(inv.id);
+    });
+  });
+
+  it('로그인 없는 설치(AUTH_MODE=none)와 함께 켜면 설정 오류', () => {
+    expect(() => testConfig({ AUTH_MODE: 'none', BETA_MODE: 'invite' })).toThrow('BETA_MODE=invite');
+  });
+});
+
+describe('운영 정보(/api/site)와 정책 문서', () => {
+  it('설정이 없으면 사업자 정보·문의 창구는 null 이고 정책은 모두 준비 중이다', async () => {
+    const { app } = setup();
+    const site = (await (await app.request('/api/site')).json()) as SiteInfo;
+    expect(site).toEqual({ beta: false, business: null, contact: null, policies: { terms: false, privacy: false, refund: false } });
+    const terms = (await (await app.request('/api/site/policies/terms')).json()) as PolicyResponse;
+    expect(terms).toEqual({ name: 'terms', title: '이용약관', markdown: null });
+  });
+
+  it('넣은 항목만 돌려주고 나머지는 null, 문의 이메일·주소를 돌려준다', async () => {
+    const { app } = setup({ BUSINESS_NAME: '시험상호', BUSINESS_REG_NO: '000-00-00000', CONTACT_EMAIL: 'help@example.com' });
+    const site = (await (await app.request('/api/site')).json()) as SiteInfo;
+    expect(site.business).toMatchObject({ name: '시험상호', registrationNo: '000-00-00000', owner: null, mailOrderNo: null });
+    expect(site.contact).toEqual({ email: 'help@example.com', url: null });
+  });
+
+  it('POLICY_DIR 의 파일을 요청마다 읽고, 없는 파일은 준비 중, 목록에 없는 이름은 404', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'alldoc-policy-'));
+    writeFileSync(join(dir, 'terms.md'), '# 시험 약관\n첫 판');
+    const { app } = setup({ POLICY_DIR: dir });
+    expect(((await (await app.request('/api/site')).json()) as SiteInfo).policies).toEqual({ terms: true, privacy: false, refund: false });
+    expect(((await (await app.request('/api/site/policies/terms')).json()) as PolicyResponse).markdown).toBe('# 시험 약관\n첫 판');
+    writeFileSync(join(dir, 'terms.md'), '# 시험 약관\n둘째 판');
+    expect(((await (await app.request('/api/site/policies/terms')).json()) as PolicyResponse).markdown).toContain('둘째 판');
+    expect(((await (await app.request('/api/site/policies/refund')).json()) as PolicyResponse).markdown).toBeNull();
+    expect((await app.request('/api/site/policies/..%2Fsecret')).status).toBe(404);
+    expect((await app.request('/api/site/policies/secret')).status).toBe(404);
+  });
+
+  it('문의 주소는 http(s) 만 받는다', () => {
+    expect(() => testConfig({ CONTACT_URL: 'javascript:alert(1)' })).toThrow();
   });
 });

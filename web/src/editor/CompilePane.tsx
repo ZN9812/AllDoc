@@ -1,6 +1,6 @@
 import { countBySeverity, type TexDiagnostic } from '@alldoc/shared';
 import { fixTexErrors } from '../ai/actions';
-import { loginUrl } from '../ai/client';
+import LoginLink from '../components/LoginLink';
 import { useSettings } from '../state/settings';
 import { aiAvailability, compileAvailability, useAuth } from '../state/auth';
 import { useTerms } from '../state/terms';
@@ -31,9 +31,9 @@ export default function CompilePane() {
             <b>{avail.message}</b>
           </p>
           {avail.reason === 'login' && (
-            <a className="btn primary" href={loginUrl(window.location.pathname)}>
+            <LoginLink className="btn primary" next={window.location.pathname}>
               {me?.authMode === 'dev' ? '로그인(개발용)' : '구글로 로그인'}
-            </a>
+            </LoginLink>
           )}
           {avail.reason === 'agreement' && (
             <button type="button" className="btn primary" onClick={() => useTerms.getState().show()}>

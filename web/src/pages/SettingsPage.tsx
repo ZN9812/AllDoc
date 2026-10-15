@@ -4,6 +4,7 @@ import { ApiError, postDeleteAccount, postLogoutAll } from '../ai/client';
 import { providerName } from '../ai/providerName';
 import { SOURCE_URL } from '../brand/brand';
 import Nav from '../components/Nav';
+import SiteFooter from '../components/SiteFooter';
 import TopBar from '../components/TopBar';
 import { removeDoc } from '../lib/docs';
 import { DOCX_ENABLED } from '../lib/features';
@@ -227,6 +228,7 @@ export default function SettingsPage() {
               자세한 목록은 소스 저장소의 THIRD_PARTY_NOTICES.md에 있어요.
             </p>
           </section>
+          <SiteFooter />
         </main>
       </div>
     </div>

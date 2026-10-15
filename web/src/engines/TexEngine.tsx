@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { isTexSource, isTextFile, normalizeProjectPath, slotOf, TEX_ENGINE_LABEL, TEX_ENGINES, type Op, type TexEngine as Engine } from '@alldoc/shared';
-import { loginUrl } from '../ai/client';
+import LoginLink from '../components/LoginLink';
 import { useEditor } from '../editor/store';
 import { compileProject } from '../editor/tex/compile';
 import { diagnosticsFor, isBusy, statusText, useTex } from '../editor/tex/store';
@@ -748,9 +748,9 @@ export default function TexEngine({ doc, toolsHost, onReady, onDirty, onPages, o
                   <>
                     <p>{avail.message}</p>
                     {avail.reason === 'login' && (
-                      <a className="btn primary" href={loginUrl(window.location.pathname)}>
+                      <LoginLink className="btn primary" next={window.location.pathname}>
                         {me?.authMode === 'dev' ? '로그인(개발용)' : '구글로 로그인'}
-                      </a>
+                      </LoginLink>
                     )}
                   </>
                 )}

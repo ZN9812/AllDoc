@@ -4,7 +4,12 @@ import {
   AiResponseSchema,
   ErrorResponseSchema,
   MeResponseSchema,
+  PolicyResponseSchema,
+  SiteInfoSchema,
   type AiRequest,
+  type PolicyName,
+  type PolicyResponse,
+  type SiteInfo,
   type AiResponse,
   type MeResponse,
 } from '@alldoc/shared';
@@ -82,6 +87,17 @@ export async function postLogout(): Promise<void> {
   await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => undefined);
 }
 
-export function loginUrl(next: string): string {
-  return `/api/auth/login?next=${encodeURIComponent(next)}`;
+/** 하단 사업자 정보·문의 창구·정책 파일 유무·비공개 베타 여부 */
+export function fetchSite(signal?: AbortSignal): Promise<SiteInfo> {
+  return request('/api/site', { signal }, SiteInfoSchema);
+}
+
+export function fetchPolicy(name: PolicyName, signal?: AbortSignal): Promise<PolicyResponse> {
+  return request(`/api/site/policies/${name}`, { signal }, PolicyResponseSchema);
+}
+
+/** 로그인 주소. 비공개 베타에서는 초대 코드를 함께 보낸다(이메일로 초대받았으면 없어도 된다). */
+export function loginUrl(next: string, invite?: string): string {
+  const code = invite?.trim();
+  return `/api/auth/login?next=${encodeURIComponent(next)}${code ? `&invite=${encodeURIComponent(code)}` : ''}`;
 }

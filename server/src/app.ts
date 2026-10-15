@@ -1,8 +1,10 @@
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { compress } from 'hono/compress';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
-import { ACCOUNT_DELETE_CONFIRM, AgreeRequestSchema, AiRequestSchema, ERROR_CODES, isAiTarget, MAX_DOC_CHARS, taskOf, type AiResponse, type MeResponse, type Quota } from '@alldoc/shared';
+import { ACCOUNT_DELETE_CONFIRM, AgreeRequestSchema, POLICY_NAMES, POLICY_TITLES, type PolicyName, type PolicyResponse, type SiteInfo, AiRequestSchema, ERROR_CODES, isAiTarget, MAX_DOC_CHARS, taskOf, type AiResponse, type MeResponse, type Quota } from '@alldoc/shared';
 import { toProposals } from './ai/convert';
 import type { Providers } from './ai/providers';
 import { ProviderFailedError, ProviderRefusedError, type ProviderUsage } from './ai/types';
@@ -23,6 +25,7 @@ import {
 } from './auth/session';
 import type { AuditLog } from './audit';
 import type { AccountStore } from './auth/accounts';
+import type { InviteStore } from './auth/invites';
 import { deleteAccount } from './auth/deletion';
 import { monthStart, type EntitlementStore } from './billing/entitlements';
 import type { Config } from './config';
@@ -39,6 +42,8 @@ export interface AppDeps {
   accounts: AccountStore;
   entitlements: EntitlementStore;
   audit: AuditLog;
+  /** 비공개 베타 초대(config.beta 일 때 필요) */
+  invites?: InviteStore;
   providers: Providers;
   /** AI 사용량 원장. 없으면 남기지 않는다(시험 등). */
   ledger?: LedgerStore;
@@ -53,6 +58,8 @@ export interface AppDeps {
 /** 요청 본문 최대 크기. 문서 글자 수 상한(MAX_DOC_CHARS)보다 넉넉하게 둔다(서식 정보 포함). */
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const AI_TIMEOUT_MS = 150_000;
+/** 정책 문서(md) 한 개의 최대 크기 */
+const MAX_POLICY_BYTES = 512 * 1024;
 
 /**
  * 브라우저가 지켜야 하는 보안 규칙. 문서 편집기(WASM, 작업 스레드, 같은 출처 iframe)가 필요로 하는 것만 열어 둔다.
@@ -91,19 +98,43 @@ export function createApp(deps: AppDeps): Hono {
     if (!s) return null;
     const a = accounts.get(s.id);
     if (!a || a.deletedAt !== null || a.status !== 'active' || a.sessionVersion !== s.sv) return null;
+    // 비공개 베타: 초대로 들어온 계정(과 관리자)만. 초대를 거두면 다음 요청부터 막힌다.
+    if (config.beta && a.inviteId === null && a.role !== 'admin') return null;
     return { id: a.id, name: a.name, email: a.email };
   };
 
   /** 서버에 약관 판이 있고, 이 사용자가 그 판에 아직 동의하지 않았는지 */
   const needsAgreement = (userId: string): boolean => config.terms !== null && accounts.get(userId)?.termsVersion !== config.terms.version;
 
-  /** 로그인 처리: 계정을 만들거나 갱신하고 세션 쿠키를 준다. 차단된 계정이면 false. */
-  const startSession = (c: Context, user: SessionUser): boolean => {
-    const a = accounts.login(user, now().getTime());
-    if (a.status !== 'active') return false;
-    setCookie(c, SESSION_COOKIE, newSessionToken(user, config.sessionSecret, now().getTime(), a.sessionVersion), cookieOpts(SESSION_TTL_SEC));
-    return true;
+  /**
+   * 로그인 처리: 계정을 만들거나 갱신하고 세션 쿠키를 준다.
+   * 비공개 베타(config.beta)에서는 이미 초대로 들어온 계정이 아니면 이메일 허용 목록(구글이 확인한 이메일)이나 초대 코드가 있어야 하고,
+   * 둘 다 없으면 계정 행을 만들지 않는다.
+   */
+  const startSession = (c: Context, user: SessionUser, opts: { emailVerified?: boolean; inviteCode?: string | null } = {}): 'ok' | 'blocked' | 'invite' => {
+    const nowMs = now().getTime();
+    const existing = accounts.get(user.id);
+    if (existing && existing.status !== 'active') return 'blocked';
+    let inviteId: number | null = null;
+    if (config.beta && !(existing && (existing.inviteId !== null || (existing.role === 'admin' && existing.deletedAt === null)))) {
+      if (!deps.invites) throw new Error('BETA_MODE=invite 인데 초대 저장소가 없어요.');
+      if (opts.emailVerified && user.email) inviteId = deps.invites.redeemEmail(user.email, nowMs);
+      if (inviteId === null && opts.inviteCode) inviteId = deps.invites.redeemCode(opts.inviteCode, nowMs);
+      if (inviteId === null) {
+        log('베타 초대 없이 로그인 시도', { codeGiven: Boolean(opts.inviteCode) });
+        return 'invite';
+      }
+    }
+    const a = accounts.login(user, nowMs);
+    if (a.status !== 'active') return 'blocked';
+    if (inviteId !== null && deps.invites) {
+      deps.invites.admit(a.id, inviteId);
+      deps.audit.record({ at: nowMs, actor: 'system', action: 'beta.admit', target: a.id, detail: JSON.stringify({ invite: inviteId }) });
+    }
+    setCookie(c, SESSION_COOKIE, newSessionToken(user, config.sessionSecret, nowMs, a.sessionVersion), cookieOpts(SESSION_TTL_SEC));
+    return 'ok';
   };
+  const loginFailRedirect = (r: 'blocked' | 'invite') => (r === 'blocked' ? '/?login=blocked' : '/?login=invite');
 
   const securityHeaders: MiddlewareHandler = async (c, next) => {
     await next();
@@ -172,6 +203,38 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(body);
   });
 
+  // ---- 운영 정보(하단 사업자 정보·문의 창구·정책 문서) ----
+  const policyFile = (name: PolicyName): string | null => {
+    if (!config.site.policyDir) return null;
+    const file = join(config.site.policyDir, `${name}.md`);
+    return existsSync(file) && statSync(file).isFile() ? file : null;
+  };
+  app.get('/api/site', (c) => {
+    const body: SiteInfo = {
+      beta: config.beta,
+      business: config.site.business,
+      contact: config.site.contact,
+      policies: { terms: policyFile('terms') !== null, privacy: policyFile('privacy') !== null, refund: policyFile('refund') !== null },
+    };
+    return c.json(body);
+  });
+  /** 정책 전문. 파일은 요청마다 읽어서 서버를 다시 켜지 않고 바꿀 수 있다. 없으면 markdown 이 null(화면은 "준비 중") */
+  app.get('/api/site/policies/:name', (c) => {
+    const name = c.req.param('name') as PolicyName;
+    if (!(POLICY_NAMES as readonly string[]).includes(name)) return fail(c, 404, 'not_found', '찾을 수 없는 문서예요.');
+    const file = policyFile(name);
+    let markdown: string | null = null;
+    if (file) {
+      if (statSync(file).size > MAX_POLICY_BYTES) {
+        log('정책 문서가 너무 커서 보여 주지 않음', { name, maxBytes: MAX_POLICY_BYTES });
+      } else {
+        markdown = readFileSync(file, 'utf8');
+      }
+    }
+    const body: PolicyResponse = { name, title: POLICY_TITLES[name], markdown };
+    return c.json(body);
+  });
+
   // ---- 로그인 ----
   app.get('/api/auth/login', (c) => {
     const next = safeNext(c.req.query('next'));
@@ -181,26 +244,30 @@ export function createApp(deps: AppDeps): Hono {
     if (config.authMode === 'dev') {
       const name = (c.req.query('user') ?? '개발용 사용자').trim().slice(0, 40) || '개발용 사용자';
       const user: SessionUser = { id: `dev:${name}`, name, email: null };
-      if (!startSession(c, user)) return c.redirect('/?login=blocked');
+      const r = startSession(c, user, { inviteCode: c.req.query('invite') ?? null });
+      if (r !== 'ok') return c.redirect(loginFailRedirect(r));
       return c.redirect(next);
     }
 
     if (!config.google) return fail(c, 503, ERROR_CODES.aiUnavailable, '구글 로그인이 설정되어 있지 않아요.');
     const state = randomToken();
     const verifier = randomToken(48);
-    setCookie(c, OAUTH_COOKIE, seal({ state, verifier, next }, config.sessionSecret, nowMs, OAUTH_TTL_SEC), cookieOpts(OAUTH_TTL_SEC));
+    // 초대 코드는 구글을 다녀오는 동안 서명한 쿠키에 담아 둔다(베타가 꺼져 있으면 쓰지 않는다).
+    const invite = config.beta ? (c.req.query('invite') ?? '').slice(0, 80) || null : null;
+    setCookie(c, OAUTH_COOKIE, seal({ state, verifier, next, invite }, config.sessionSecret, nowMs, OAUTH_TTL_SEC), cookieOpts(OAUTH_TTL_SEC));
     return c.redirect(buildAuthUrl(config.google, `${config.publicUrl}/api/auth/callback`, state, pkceChallenge(verifier)));
   });
 
   app.get('/api/auth/callback', async (c) => {
-    const saved = open<{ state: string; verifier: string; next: string }>(getCookie(c, OAUTH_COOKIE), config.sessionSecret, now().getTime());
+    const saved = open<{ state: string; verifier: string; next: string; invite?: string | null }>(getCookie(c, OAUTH_COOKIE), config.sessionSecret, now().getTime());
     deleteCookie(c, OAUTH_COOKIE, { path: '/' });
     const code = c.req.query('code');
     const state = c.req.query('state');
     if (config.authMode !== 'google' || !config.google || !saved || !code || !state || state !== saved.state) return c.redirect('/?login=failed');
     try {
-      const user = await loginWithCode(config.google, `${config.publicUrl}/api/auth/callback`, code, saved.verifier, deps.fetch);
-      if (!startSession(c, user)) return c.redirect('/?login=blocked');
+      const { emailVerified, ...user } = await loginWithCode(config.google, `${config.publicUrl}/api/auth/callback`, code, saved.verifier, deps.fetch);
+      const r = startSession(c, user, { emailVerified, inviteCode: saved.invite ?? null });
+      if (r !== 'ok') return c.redirect(loginFailRedirect(r));
       return c.redirect(safeNext(saved.next));
     } catch (e) {
       log('구글 로그인 실패', { reason: e instanceof Error ? e.message : String(e) });

@@ -45,6 +45,15 @@ export const MIGRATIONS: readonly string[] = [
    CREATE TABLE user_blobs (user_id TEXT NOT NULL, hash TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (user_id, hash));
    CREATE INDEX user_blobs_hash ON user_blobs (hash);
    CREATE INDEX user_blobs_at ON user_blobs (at);`,
+  // 5: 비공개 베타 초대(이메일 허용 목록·초대 코드)와 계정이 어떤 초대로 들어왔는지
+  `CREATE TABLE invites (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL, value TEXT NOT NULL,
+    max_uses INTEGER, uses INTEGER NOT NULL DEFAULT 0, expires_at INTEGER,
+    note TEXT, created_at INTEGER NOT NULL, created_by TEXT NOT NULL, revoked_at INTEGER);
+   CREATE UNIQUE INDEX invites_live_value ON invites (kind, value) WHERE revoked_at IS NULL;
+   ALTER TABLE users ADD COLUMN invite_id INTEGER;
+   CREATE INDEX users_invite ON users (invite_id);`,
 ];
 
 export function migrate(db: DatabaseSync): number {

@@ -37,7 +37,7 @@ export async function loginWithCode(
   code: string,
   verifier: string,
   fetchFn: typeof fetch = fetch,
-): Promise<SessionUser> {
+): Promise<SessionUser & { emailVerified: boolean }> {
   const tokenRes = await fetchFn(TOKEN_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -57,11 +57,13 @@ export async function loginWithCode(
 
   const infoRes = await fetchFn(USERINFO_URL, { headers: { authorization: `Bearer ${token.access_token}` }, signal: AbortSignal.timeout(15_000) });
   if (!infoRes.ok) throw new GoogleLoginError(`사용자 정보 조회 실패(${infoRes.status})`);
-  const info = (await infoRes.json()) as { sub?: unknown; name?: unknown; email?: unknown };
+  const info = (await infoRes.json()) as { sub?: unknown; name?: unknown; email?: unknown; email_verified?: unknown };
   if (typeof info.sub !== 'string' || info.sub.length === 0) throw new GoogleLoginError('사용자 식별자가 없어요.');
   return {
     id: `g:${info.sub}`,
     name: typeof info.name === 'string' ? info.name : null,
     email: typeof info.email === 'string' ? info.email : null,
+    // 비공개 베타의 이메일 허용 목록은 구글이 확인한 이메일만 대조한다.
+    emailVerified: info.email_verified === true,
   };
 }

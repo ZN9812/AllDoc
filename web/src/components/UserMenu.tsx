@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { loginUrl } from '../ai/client';
+import LoginLink from './LoginLink';
 import { useClickOutside } from '../lib/useClickOutside';
 import { useAuth } from '../state/auth';
 
@@ -18,9 +18,9 @@ export default function UserMenu() {
 
   if (!me.authenticated) {
     return (
-      <a className="btn ghost" href={loginUrl(loc.pathname + loc.search)}>
+      <LoginLink className="btn ghost" next={loc.pathname + loc.search}>
         로그인
-      </a>
+      </LoginLink>
     );
   }
 

@@ -119,4 +119,13 @@ test.describe('화면 색(야간 모드)과 설정', () => {
     await page.goto('/settings');
     await expect(page.getByRole('link', { name: /github\.com/ })).toBeVisible();
   });
+
+  test('사업자 정보를 설정하지 않은 서버는 하단에 정책 링크만 보이고, 정책 화면은 준비 중이다', async ({ page }) => {
+    await page.goto('/');
+    const footer = page.getByTestId('site-footer');
+    await expect(footer.getByRole('link')).toHaveText(['이용약관', '개인정보처리방침', '환불정책']);
+    await expect(footer.getByTestId('business-info')).toHaveCount(0);
+    await page.goto('/privacy');
+    await expect(page.getByTestId('policy-pending')).toHaveText('개인정보처리방침은 준비 중이에요.');
+  });
 });
