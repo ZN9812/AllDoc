@@ -61,12 +61,64 @@ export interface CostSummaryRow {
   avgInputTokens: number;
   avgOutputTokens: number;
   avgCacheReadTokens: number;
+  /** 사용량을 아는 요청의 토큰 백분위(출력에는 추론 토큰 포함) */
+  p50InputTokens: number;
+  p95InputTokens: number;
+  p50OutputTokens: number;
+  p95OutputTokens: number;
+  /** 모든 요청의 걸린 시간 백분위(밀리초) */
+  p50Ms: number;
+  p95Ms: number;
+}
+
+/** 엔진별 컴파일 요약. 시간·크기 백분위는 일꾼이 실제로 돌린 것(ok·error·timeout)만 센다(하루 한도와 같은 기준). */
+export interface CompileSummaryRow {
+  engine: string;
+  /** 모든 결과(캐시·대기열 꽉 참 포함) */
+  requests: number;
+  outcomes: Record<string, number>;
+  /** 일꾼이 실제로 돌린 수 */
+  runs: number;
+  p50WallMs: number;
+  p95WallMs: number;
+  maxWallMs: number;
+  p50ProjectBytes: number;
+  p95ProjectBytes: number;
+  p50PdfBytes: number;
+}
+
+/** 값 묶음의 분포. n 은 묶음 수(예: 쓴 사람·날 쌍의 수) */
+export interface Distribution {
+  n: number;
+  p50: number;
+  p95: number;
+  max: number;
+}
+
+/**
+ * 사용자당 사용량 분포. 로그인 없이 쓴 줄(user_id 없음)은 빼고, "쓴 날(달)"만 센다(안 쓴 날의 0 은 넣지 않는다).
+ * AI 횟수는 하루 한도와 같은 기준(ok·refused, 실패·취소는 횟수를 돌려주므로 뺌), 원가는 모든 줄의 합이다.
+ */
+export interface UserUsageSummary {
+  /** 기간에 AI 나 컴파일을 한 번이라도 쓴 사용자 수 */
+  activeUsers: number;
+  aiPerUserDay: { requests: Distribution; costMicroUsd: Distribution };
+  aiPerUserMonth: { requests: Distribution; costMicroUsd: Distribution };
+  compilePerUserDay: { runs: Distribution; seconds: Distribution };
+  compilePerUserMonth: { runs: Distribution; seconds: Distribution };
 }
 
 /** 순위 기준 백분위(정렬된 배열) */
 function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0;
   return sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)] ?? 0;
+}
+
+const sortedNums = (xs: Array<number | null>): number[] => xs.filter((x): x is number => x !== null).sort((a, b) => a - b);
+
+export function distribution(values: number[]): Distribution {
+  const s = [...values].sort((a, b) => a - b);
+  return { n: s.length, p50: percentile(s, 50), p95: percentile(s, 95), max: s[s.length - 1] ?? 0 };
 }
 
 export class LedgerStore {
@@ -159,10 +211,11 @@ export class LedgerStore {
     const rows = this.db
       .prepare(
         `SELECT task, COALESCE(model_served, model_requested) AS model, outcome, fallback, cost_micro_usd AS cost,
-                input_tokens AS input, output_tokens AS output, cache_read_tokens AS cacheRead
+                input_tokens AS input, output_tokens AS output, cache_read_tokens AS cacheRead,
+                ms
          FROM ai_events WHERE day >= ? AND day <= ? ORDER BY task, model`,
       )
-      .all(fromDay, toDay) as Array<{ task: string; model: string; outcome: string; fallback: number; cost: number | null; input: number | null; output: number | null; cacheRead: number | null }>;
+      .all(fromDay, toDay) as Array<{ task: string; model: string; outcome: string; fallback: number; cost: number | null; input: number | null; output: number | null; cacheRead: number | null; ms: number }>;
     const groups = new Map<string, typeof rows>();
     for (const r of rows) {
       const k = `${r.task}\u0000${r.model}`;
@@ -173,6 +226,9 @@ export class LedgerStore {
       const costs = known.map((r) => r.cost as number).sort((a, b) => a - b);
       const avg = (f: (r: (typeof g)[number]) => number | null) => (known.length ? Math.round(known.reduce((n, r) => n + (f(r) ?? 0), 0) / known.length) : 0);
       const first = g[0] as (typeof g)[number];
+      const inputs = sortedNums(known.map((r) => r.input));
+      const outputs = sortedNums(known.map((r) => r.output));
+      const ms = sortedNums(g.map((r) => r.ms));
       return {
         task: first.task,
         model: first.model,
@@ -186,7 +242,82 @@ export class LedgerStore {
         avgInputTokens: avg((r) => r.input),
         avgOutputTokens: avg((r) => r.output),
         avgCacheReadTokens: avg((r) => r.cacheRead),
+        p50InputTokens: percentile(inputs, 50),
+        p95InputTokens: percentile(inputs, 95),
+        p50OutputTokens: percentile(outputs, 50),
+        p95OutputTokens: percentile(outputs, 95),
+        p50Ms: percentile(ms, 50),
+        p95Ms: percentile(ms, 95),
       };
     });
   }
+
+  /** 기간 동안 엔진별 컴파일 요약 */
+  compileSummary(fromDay: string, toDay: string): CompileSummaryRow[] {
+    const rows = this.db
+      .prepare('SELECT engine, outcome, wall_ms AS ms, project_bytes AS bytes, pdf_bytes AS pdf FROM compile_events WHERE day >= ? AND day <= ? ORDER BY engine')
+      .all(fromDay, toDay) as Array<{ engine: string; outcome: string; ms: number; bytes: number; pdf: number | null }>;
+    const groups = new Map<string, typeof rows>();
+    for (const r of rows) groups.set(r.engine, [...(groups.get(r.engine) ?? []), r]);
+    return [...groups.entries()].map(([engine, g]) => {
+      const outcomes: Record<string, number> = {};
+      for (const r of g) outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
+      const ran = g.filter((r) => COUNTED_COMPILE.has(r.outcome));
+      const wall = sortedNums(ran.map((r) => r.ms));
+      const bytes = sortedNums(ran.map((r) => r.bytes));
+      const pdf = sortedNums(ran.map((r) => r.pdf));
+      return {
+        engine,
+        requests: g.length,
+        outcomes,
+        runs: ran.length,
+        p50WallMs: percentile(wall, 50),
+        p95WallMs: percentile(wall, 95),
+        maxWallMs: wall[wall.length - 1] ?? 0,
+        p50ProjectBytes: percentile(bytes, 50),
+        p95ProjectBytes: percentile(bytes, 95),
+        p50PdfBytes: percentile(pdf, 50),
+      };
+    });
+  }
+
+  /** 기간 동안 사용자당 하루·월 사용량 분포(요금제 한도를 정하는 근거) */
+  userUsage(fromDay: string, toDay: string): UserUsageSummary {
+    const ai = this.db
+      .prepare(
+        `SELECT user_id AS user, day, SUM(CASE WHEN outcome IN ('ok', 'refused') THEN 1 ELSE 0 END) AS requests, COALESCE(SUM(cost_micro_usd), 0) AS cost
+         FROM ai_events WHERE user_id IS NOT NULL AND day >= ? AND day <= ? GROUP BY user_id, day`,
+      )
+      .all(fromDay, toDay) as Array<{ user: string; day: string; requests: number; cost: number }>;
+    const compile = this.db
+      .prepare(
+        `SELECT user_id AS user, day, COUNT(*) AS runs, COALESCE(SUM(wall_ms), 0) AS ms
+         FROM compile_events WHERE user_id IS NOT NULL AND day >= ? AND day <= ? AND outcome IN ('ok', 'error', 'timeout') GROUP BY user_id, day`,
+      )
+      .all(fromDay, toDay) as Array<{ user: string; day: string; runs: number; ms: number }>;
+    const byMonth = <T extends { user: string; day: string }>(rows: T[], fields: Array<keyof T>) => {
+      const m = new Map<string, Record<string, number>>();
+      for (const r of rows) {
+        const k = `${r.user}\u0000${r.day.slice(0, 7)}`;
+        const acc = m.get(k) ?? {};
+        for (const f of fields) acc[f as string] = (acc[f as string] ?? 0) + (r[f] as unknown as number);
+        m.set(k, acc);
+      }
+      return [...m.values()];
+    };
+    const aiDays = ai.filter((r) => r.requests > 0 || r.cost > 0);
+    const aiMonths = byMonth(aiDays, ['requests', 'cost']);
+    const compileMonths = byMonth(compile, ['runs', 'ms']);
+    const sec = (ms: number) => Math.round(ms / 100) / 10;
+    return {
+      activeUsers: new Set([...aiDays.map((r) => r.user), ...compile.map((r) => r.user)]).size,
+      aiPerUserDay: { requests: distribution(aiDays.map((r) => r.requests)), costMicroUsd: distribution(aiDays.map((r) => r.cost)) },
+      aiPerUserMonth: { requests: distribution(aiMonths.map((r) => r.requests ?? 0)), costMicroUsd: distribution(aiMonths.map((r) => r.cost ?? 0)) },
+      compilePerUserDay: { runs: distribution(compile.map((r) => r.runs)), seconds: distribution(compile.map((r) => sec(r.ms))) },
+      compilePerUserMonth: { runs: distribution(compileMonths.map((r) => r.runs ?? 0)), seconds: distribution(compileMonths.map((r) => sec(r.ms ?? 0))) },
+    };
+  }
 }
+
+/** 하루 한도에 세는(일꾼이 실제로 돌린) 컴파일 결과 */
+const COUNTED_COMPILE = new Set(['ok', 'error', 'timeout']);
