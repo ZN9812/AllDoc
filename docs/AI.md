@@ -134,6 +134,11 @@ Claude는 정책상 답을 거절할 때가 있습니다. 이때 서버 쪽에�
 - 대체 모델이 답하면 비용·응답 품질이 달라질 수 있습니다. 쓰지 않으려면 설정 파일에서 `"fallbacks": "off"`로 끄세요.
 - **이 코드는 실제 API 키 없이 개발해서, 진짜 Claude 호출은 아직 시험하지 못했습니다.** 자동 시험은 가짜 클라이언트로 요청 모양과 오류 처리만 확인합니다.
   운영 전에 실제 키로 "AI 대화"와 "내 규칙"을 한 번씩 돌려 보고, 서버 기록에 경고가 없는지 확인하세요.
+- **진짜 호출 확인 도구**: `ANTHROPIC_API_KEY=… node --disable-warning=ExperimentalWarning server/dist/live-check.js --yes --out live-check.json`
+  - 작업 4개(chat·format_check·tex_chat·tex_fix)에 지어낸 짧은 예시 문서를 보내고, 작업마다 기본 2번 부릅니다(기본 8번 호출, `--repeat`·`--tasks` 로 줄일 수 있음). 요금이 들어서 `--yes` 가 없으면 돌지 않습니다.
+  - 확인하는 것: 모든 호출이 성공했는지, `usage` 를 받는지, 대체 모델 옵션(베타)이 받아들여졌는지, 두 번째 호출에서 `cache_read_input_tokens > 0` 인지, 응답한 모델 이름과 `usage.iterations` 항목 종류, 호출별 토큰·원가·시간, 서버 검증을 통과한 제안 수.
+  - 설정(`AI_CONFIG_PATH` 의 모델·추론 강도·캐시 범위)은 서버와 같고, 기록은 메모리 원장에만 남습니다(서버 데이터 파일은 건드리지 않음). 결과 파일에는 숫자·모델 이름·종료 이유만 담깁니다.
+  - 이 도구도 가짜 클라이언트로만 시험했습니다(`server/src/live-check.test.ts`). 실제 키로 돌린 결과는 아직 없습니다.
 
 ## 데모(`mock`)
 
