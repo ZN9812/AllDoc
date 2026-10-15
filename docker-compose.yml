@@ -17,6 +17,8 @@ services:
       # - ./ai.json:/config/ai.json:ro
       # 요금제 파일을 쓰려면 아래 줄의 주석을 풀고, .env 에 PLANS_CONFIG_PATH=/config/plans.json 을 적으세요(docs/DEPLOY.md).
       # - ./plans.json:/config/plans.json:ro
+      # 이용약관·개인정보처리방침·환불정책(terms.md·privacy.md·refund.md)을 보여 주려면 아래 줄의 주석을 풀고, .env 에 POLICY_DIR=/config/policies 를 적으세요.
+      # - ./policies:/config/policies:ro
     # LaTeX 컴파일 일꾼(아래 compiler)과 내부망으로만 이야기한다. .env 에 COMPILER=http, COMPILER_URLS=http://compiler:8790, COMPILER_SECRET 을 적으세요.
     networks:
       - default

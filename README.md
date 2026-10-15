@@ -46,7 +46,7 @@ e2e/      Playwright 종단 시험
 docs/     명세, 디자인, AI 연결 방법, 배포 방법
 ```
 
-- 서버는 계정(구글 로그인)·요금제별 AI 사용 횟수 관리와 AI 요청 중계, LaTeX 컴파일 중계를 합니다. 문서는 저장하지 않습니다(컴파일하려고 보낸 LaTeX 파일만 보관 기간 동안 둡니다). **AI 키는 서버에만** 있고 브라우저로 내려가지 않습니다.
+- 서버는 계정(구글 로그인)·요금제별 AI 사용 횟수 관리와 AI 요청 중계, LaTeX 컴파일 중계를 합니다. 운영자는 설정으로 비공개 베타(초대받은 사람만 로그인), 하단 사업자 정보·문의 창구, 이용약관·개인정보처리방침·환불정책 화면을 켤 수 있습니다(값과 문구는 운영자가 넣습니다. [`docs/DEPLOY.md`](docs/DEPLOY.md)). 문서는 저장하지 않습니다(컴파일하려고 보낸 LaTeX 파일만 보관 기간 동안 둡니다). **AI 키는 서버에만** 있고 브라우저로 내려가지 않습니다.
 - AI를 쓸 때만 문서의 글이 AI 서비스로 전송됩니다. 처음 쓸 때 동의를 받고, 설정에서 끌 수 있습니다.
 - AI 연결부는 바꿔 끼울 수 있습니다(첫 연결은 Claude). 작업별 모델·시스템 프롬프트·주소는 설정 파일로 바꿉니다 → [`docs/AI.md`](docs/AI.md)
 
@@ -57,7 +57,8 @@ docs/     명세, 디자인, AI 연결 방법, 배포 방법
 | [`docs/SPEC.md`](docs/SPEC.md) | 확정한 제품 명세 |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | 화면 구성, 색, 동작 규칙 |
 | [`docs/AI.md`](docs/AI.md) | AI 설정, 다른 AI 붙이기, 사용 횟수와 비용 |
-| [`docs/DEPLOY.md`](docs/DEPLOY.md) | Docker 배포, 구글 로그인 설정, 공개 전 점검표, 알려진 한계 |
+| [`docs/DEPLOY.md`](docs/DEPLOY.md) | Docker 배포, 구글 로그인 설정, 비공개 베타·하단 정보·가격 근거 보고, 공개·출시 전 점검표, 알려진 한계 |
+| [`docs/PRODUCT.md`](docs/PRODUCT.md) | 제품화(계정·요금제·베타·결제) 계획과 상태, 사용자가 할 일 |
 | [`docs/LATEX.md`](docs/LATEX.md) | LaTeX 편집·컴파일 설계와 구현 상태 |
 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | 가져다 쓴 소프트웨어와 라이선스 |
 

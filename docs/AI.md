@@ -109,7 +109,7 @@ interface AiProvider {
   - 원가는 `server/src/ai/pricing.ts` 의 단가표(기준일이 함께 적혀 있음)로 계산해 정수 마이크로달러로 저장합니다. 표에 없는 모델(예: 파인튜닝 모델)은 가장 비싼 단가로 계산하고 서버 기록에 한 번 경고합니다. Haiku 5.5 의 캐시 읽기 단가와 긴 프롬프트의 캐시 단가는 가정한 값이라 가격표에서 확인이 필요합니다.
   - 데모 AI(`mock`)는 모델 `mock`, 토큰 0 으로 남습니다.
   - 원장은 원가 집계에 쓰므로 자동으로 지우지 않습니다.
-- **원가 보고**: `node --disable-warning=ExperimentalWarning server/dist/ledger-report.js --days 7` 이 기간 동안 작업·모델별 요청 수, 합계, 1건 원가 p50/p95, 평균 토큰을 보여 줍니다(`--from`·`--to`·`--json` 도 받습니다. 데이터 폴더는 `DATA_DIR`). 컨테이너에서는 `docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/ledger-report.js` 처럼 돌립니다.
+- **원가 보고**: `node --disable-warning=ExperimentalWarning server/dist/ledger-report.js --days 7` 이 기간 동안 작업·모델별 요청 수, 합계, 1건 원가 p50/p95, 평균 토큰, 입력·출력 토큰과 걸린 시간 p50/p95 를 보여 주고, 이어서 컴파일 시간과 사용자당 하루·월 사용량 분포도 보여 줍니다(`docs/DEPLOY.md` "가격 근거 보고")(`--from`·`--to`·`--json` 도 받습니다. 데이터 폴더는 `DATA_DIR`). 컨테이너에서는 `docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/ledger-report.js` 처럼 돌립니다.
   - **진짜 Claude 호출로 쌓인 값은 아직 없습니다.** 실제 키로 쓰기 시작한 뒤의 p50/p95 를 이 문서에 기능별로 적을 예정입니다.
 - 요청을 보내기 **전에** 횟수를 하나 쓰고, 연결·응답 실패면 돌려줍니다. 모델이 정책상 거절한 경우는 돌려주지 않습니다.
 - 같은 사용자의 요청은 한 번에 하나만 처리합니다(진행 중 요청이 있으면 "이전 요청을 처리하는 중"이라고 안내).

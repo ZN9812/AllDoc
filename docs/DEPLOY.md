@@ -28,6 +28,10 @@
 | `PLANS_CONFIG_PATH` | 아니오 | 요금제 파일(JSON). 아래 "요금제와 관리자 도구" |
 | `AI_DAILY_BUDGET_USD` | 아니오 | 전체 사용자의 하루 AI 원가 상한(달러). 원장 기준으로 넘으면 그날은 AI 요청을 모두 503 으로 멈춥니다. Anthropic 콘솔의 월 지출 한도와 함께 쓰세요. |
 | `TERMS_VERSION`, `TERMS_URL`, `PRIVACY_URL` | 아니오 | 약관 판과 이용약관·개인정보처리방침 주소. 판을 넣으면 로그인한 사용자가 그 판에 동의(만 14세 이상 확인 포함)해야 AI 를 쓸 수 있고, 판을 바꾸면 다시 묻습니다. 판을 넣으면 두 주소도 있어야 합니다. |
+| `BETA_MODE` | 아니오 | `off`(기본) · `invite`(비공개 베타: 초대받은 사람만 로그인·가입). 아래 "비공개 베타". `AUTH_MODE=none` 과는 함께 쓸 수 없습니다. |
+| `BUSINESS_NAME`, `BUSINESS_OWNER`, `BUSINESS_REG_NO`, `BUSINESS_MAIL_ORDER_NO`, `BUSINESS_ADDRESS`, `BUSINESS_PHONE`, `BUSINESS_EMAIL`, `BUSINESS_PRIVACY_OFFICER`, `BUSINESS_HOSTING` | 아니오 | 하단에 보여 줄 상호·대표자·사업자등록번호·통신판매업 신고번호·주소·전화·이메일·개인정보 보호책임자·호스팅 제공자(각 200자 이하). 넣은 항목만 보이고, 모두 비우면 사업자 정보가 나오지 않습니다. 서버는 값이 맞는지 확인하지 않습니다. 실행할 때 읽으므로 이미지를 다시 빌드하지 않아도 됩니다. |
+| `CONTACT_EMAIL`, `CONTACT_URL` | 아니오 | 문의 창구(이메일, `http(s)` 주소). 하단과 비공개 베타 로그인 창에 보입니다. |
+| `POLICY_DIR` | 아니오 | 정책 문서 폴더. `terms.md`(이용약관)·`privacy.md`(개인정보처리방침)·`refund.md`(환불정책)가 있으면 `/terms`·`/privacy`·`/refund` 에 보이고, 없는 것은 "준비 중"으로 나옵니다. 요청마다 읽으므로 파일만 바꾸면 됩니다(파일 하나 512KB 이하, HTML 은 걸러 냄). 약관 동의를 받으려면 `TERMS_URL=https://<도메인>/terms`, `PRIVACY_URL=https://<도메인>/privacy` 처럼 이 화면을 가리켜도 됩니다. |
 | `BACKUP_DIR`, `BACKUP_KEEP` | 아니오 | 하루 한 번 데이터 파일 스냅숏을 둘 폴더(기본 `DATA_DIR/backups`)와 남길 개수(기본 14, `0` 이면 끔). 아래 "백업" |
 | `APP_TIMEZONE` | 아니오 | 하루가 바뀌는 시간대(기본 `Asia/Seoul`) |
 | `PORT` | 아니오 | 서버가 듣는 포트(기본 8787). Docker에서는 그대로 두고 바깥 포트만 바꾸는 편이 쉽습니다. |
@@ -52,6 +56,7 @@
 서버는 인증 코드 방식(PKCE 포함)으로 로그인합니다. 서버 저장소(SQLite)에는 다음이 남습니다.
 - **계정**: 사용자 번호(구글 계정 식별값), 이름·이메일, 가입·마지막 로그인 시각, 상태(차단 여부), 약관 동의 판·시각
 - 날짜별 AI 사용 횟수(62일 보관), AI 요청별 사용량(토큰·원가·모델, 문서 글은 없음. [AI.md](AI.md)), 관리자가 준 요금제, 관리 기록
+- 비공개 베타(`BETA_MODE=invite`)를 쓰면: 초대(허용한 이메일 주소 또는 코드, 쓴 횟수·기한·메모)와 계정이 어떤 초대로 들어왔는지. 허용 목록의 이메일은 그 사람이 가입하기 전에도 서버에 있으므로 처리방침에 적으세요.
 
 세션 쿠키는 서명만 하고 서버에 목록을 두지 않지만, 요청마다 계정을 한 번 조회해 탈퇴·차단·"모든 기기에서 로그아웃"을 바로 반영합니다(쿠키 안의 세션 버전이 계정의 버전과 달라지면 무효).
 **이 기능이 들어간 판으로 올리면 그 전에 받은 쿠키는 모두 무효가 되어 사용자가 한 번 다시 로그인해야 합니다.**
@@ -118,8 +123,34 @@ docker compose up -d --build
 ```bash
 docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/admin.js user someone@example.com
 docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/admin.js grant g:1234 pro --days 30 --note 베타
-# 그 밖에: plans · revoke · ban · unban · logout-all · role · delete --yes · audit
+# 그 밖에: plans · revoke · ban · unban · logout-all · role · delete --yes · audit · invite(아래)
 ```
+
+### 비공개 베타
+
+`BETA_MODE=invite` 로 켜면 초대받은 사람만 로그인·가입합니다. 기본(`off`)은 지금처럼 누구나 로그인합니다.
+- 초대는 두 가지입니다. **이메일 허용 목록**: 구글이 확인한(`email_verified`) 이메일이 목록과 같으면 들어옵니다(대소문자 무시). **초대 코드**: 로그인 버튼을 누르면 나오는 창에 적습니다. 횟수(`--uses`)와 기한(`--days`)을 둘 수 있고, `https://<도메인>/?invite=<코드>` 링크로 보내면 코드가 채워진 창이 열립니다.
+- 초대 없이 온 사람은 `/?login=invite` 로 돌아가 안내를 보고, 계정 행은 만들어지지 않습니다. 한 번 들어온 계정은 다음부터 코드 없이 로그인합니다.
+- 초대를 거두면 그 초대로 들어온 계정은 다음 요청부터 로그아웃되고, 다시 초대받아야 합니다. 베타를 켜기 전에 만든 계정도 초대가 있어야 합니다(이메일 허용 목록에 넣으면 다음 로그인에 들어옵니다). 관리자 역할(`role <번호> admin`)은 초대 없이 들어옵니다.
+- 베타를 끄면(`off`) 초대와 상관없이 다시 누구나 로그인합니다. 초대 기록은 남습니다.
+
+```bash
+docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/admin.js invite add email someone@example.com --note 1차
+docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/admin.js invite add code --uses 20 --days 14 --note 연구실
+docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/admin.js invite list          # --all 이면 거둔 것도
+docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/admin.js invite revoke 3
+```
+
+### 가격 근거 보고
+
+`ledger-report.js` 가 기간 동안의 원장으로 ① AI 작업·모델별 1건 원가·입력/출력 토큰·걸린 시간 p50/p95, ② 엔진별 컴파일 결과 건수와 실제 실행 시간·프로젝트 크기 p50/p95, ③ 사용자당 하루·월 AI 횟수·원가와 컴파일 횟수·시간 분포(p50/p95/최대)를 보여 줍니다. 요금제 한도와 가격을 정할 때 씁니다(`docs/PRODUCT.md` G2).
+
+```bash
+docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/ledger-report.js --days 28
+docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/ledger-report.js --from 2026-11-01 --to 2026-11-30 --json
+```
+- 사용자당 분포는 **쓴 날·쓴 달만** 셉니다(안 쓴 날의 0 은 넣지 않음). 로그인 없이 쓴 줄은 빠지고, 탈퇴한 사용자는 가명으로 남아 계속 셉니다. AI 횟수는 하루 한도와 같은 기준(성공·거절)이고 원가는 모든 줄의 합입니다.
+- 기간이 달의 일부만 덮으면 그 달 값은 덮은 날만 센 것입니다. 지금 이 저장소에는 진짜 호출로 쌓인 원장이 없어 실제 수치는 아직 없습니다.
 
 ## LaTeX 컴파일
 
@@ -215,6 +246,15 @@ docker build --build-arg VITE_DISABLE_DOCX=1 -t alldoc .
 - [ ] Anthropic 콘솔에 월 지출 한도를 걸었고, 요금제 한도(`DAILY_AI_LIMIT` 또는 `PLANS_CONFIG_PATH`)와 `AI_DAILY_BUDGET_USD` 를 정했다.
 - [ ] 서버 밖 백업 복사를 설정했고, 스냅숏으로 되살리는 훈련을 한 번 했다.
 - [ ] 약관 동의를 받는다면 `TERMS_VERSION`·`TERMS_URL`·`PRIVACY_URL` 을 넣었다(약관 본문은 법률 검토 필요).
+
+유료 출시(결제를 받기) 전 점검표. 코드가 아니라 운영자가 해야 할 일이 대부분입니다(`docs/PRODUCT.md` "M4 사용자가 할 일").
+- [ ] 사업자등록·통신판매업 신고를 마쳤고 `BUSINESS_*` 를 채워 하단에 보이는 것을 확인했다(번호는 직접 대조).
+- [ ] 이용약관·개인정보처리방침·환불정책을 법률 검토를 받아 `POLICY_DIR` 에 넣었고, `/terms`·`/privacy`·`/refund` 가 "준비 중"이 아니다. 판을 `TERMS_VERSION` 에 적었다.
+- [ ] `CONTACT_EMAIL`(또는 `CONTACT_URL`)을 넣었고 그 주소로 온 문의를 실제로 받는다.
+- [ ] 비공개 베타를 연다면 `BETA_MODE=invite` 로 켜고, 초대를 만들어 한 명이 실제로 들어오는 것을 봤다.
+- [ ] 베타 2–4주 뒤 `ledger-report.js` 로 원가·사용량 분포를 뽑아 가격 결정을 `docs/PRODUCT.md` 에 기록했다.
+- [ ] PG 심사를 받았다(사이트 이름·도메인·하단 정보·약관·환불정책을 봄).
+- [ ] SuperDoc 결정(계약 또는 `VITE_DISABLE_DOCX=1`)을 기록했다.
 - [ ] LaTeX 컴파일을 켠다면: 컴파일 일꾼 이미지를 실제 서버에서 띄우고 탈출 시험(`docker run … alldoc-compiler node dist/escape.js`, `.github/workflows/latex.yml` 과 같은 설정)이 통과하는 것을 확인했다. 커널의 사용자 이름공간 설정(위 "LaTeX 컴파일")을 확인했다. 컴파일 한도·보관 날 수를 정했다(지금 값은 임시).
 - [ ] 구글 로그인을 실제 도메인에서 끝까지 해 봤다(로그인 → AI 사용 → 로그아웃).
 - [ ] HTTPS이고, `SESSION_SECRET`이 충분히 긴 무작위 값이다.
@@ -291,12 +331,14 @@ docker build --build-arg VITE_DISABLE_DOCX=1 -t alldoc .
 - **PDF**: 보기만 됩니다. 한글 문서의 PDF 저장은 한글 편집기의 인쇄 창을 엽니다(브라우저가 PDF로 저장). Word 문서의 PDF 저장은 아직 없습니다.
 - **휴대폰**: Chromium 에뮬레이션(Pixel 7)으로 화면 배치와 단추 크기를 시험했습니다. 실제 기기(터치 입력, 한글 입력기, 가상 키보드)에서는 시험하지 못했습니다. Word 편집기의 도구는 영어 보조 문구(접근성 라벨 등)가 일부 남아 있습니다.
 - **AI**: 제안이 문서에 맞는지 서버가 걸러 주지만, 제안의 **내용이 옳은지**는 보장하지 못합니다. 그래서 항상 사용자가 적용 여부를 정합니다.
+- **출시 준비(M4, 2026-10-15 이 환경에서 확인)**: 비공개 베타·하단 사업자 정보·정책 문서·문의 창구는 서버 단위 시험과 종단 시험(`e2e/launch.spec.ts`, 개발용 로그인)으로만 확인했습니다. 이메일 허용 목록은 가짜 구글 응답으로 `email_verified` 대조만 시험했고 실제 구글 로그인으로는 해 보지 않았습니다. 하단 정보와 정책 문서는 운영자가 넣은 값을 그대로 보여 줄 뿐, 법이 요구하는 항목·문구를 갖췄는지는 확인하지 않습니다(법률 검토 필요). 정책 문서의 판 관리(옛 판 보관·바뀐 날 표시)는 없습니다.
 
 ## 문제 해결
 
 | 증상 | 확인할 것 |
 | --- | --- |
 | "이 서버에는 한글 편집기가 설치되어 있지 않아요" | 빌드 기록에서 "한글 편집기" 경고를 찾으세요. 빌드하는 곳이 GitHub에 못 나갔을 가능성이 큽니다. `RHWP_STUDIO_STRICT=1`로 빌드하면 그때 멈춰 알려 줍니다. |
+| 로그인 후 `/?login=invite`, "초대받은 분만" 안내 | `BETA_MODE=invite` 입니다. `admin.js invite list` 로 그 이메일·코드가 살아 있는지(거둠·만료·횟수)를 보고, 이메일이면 구글 계정의 이메일과 같은지 확인하세요. |
 | 구글 로그인 후 `/?login=failed` | 승인된 리디렉션 URI가 `{PUBLIC_URL}/api/auth/callback`과 정확히 같은지, `PUBLIC_URL`이 사용자가 실제로 접속하는 주소인지 확인하세요. 서버 기록에 실패 이유가 남습니다. |
 | "AI 서비스 인증에 문제가 있어요" | `ANTHROPIC_API_KEY`가 맞는지, 키에 해당 모델을 쓸 권한이 있는지 확인하세요. |
 | "이 서버에는 AI가 연결되어 있지 않아요" | `AI_PROVIDER`와 키를 확인하세요. 키가 없으면 서버가 켜질 때 경고를 남깁니다. |
