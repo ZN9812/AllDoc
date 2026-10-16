@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { ProviderUsage } from './ai/types';
 import { openDb } from './db';
-import { LedgerStore, type AiEventInput } from './ledger';
-import { formatReport, parseArgs } from './ledger-report';
+import { distribution, LedgerStore, type AiEventInput, type CompileEventInput } from './ledger';
+import { buildReport, formatReport, parseArgs } from './ledger-report';
 
 const opus = (input: number, output: number): ProviderUsage => ({
   modelRequested: 'claude-opus-5-5',
@@ -119,5 +119,84 @@ describe('원장 보고 명령', () => {
     expect(text).toContain('chat · claude-opus-5-5');
     expect(text).toContain('p50 $0.1400');
     expect(text).toContain('합계 $0.1400');
+  });
+});
+
+describe('가격 근거 보고(가짜 원장 자료)', () => {
+  const compile = (over: Partial<CompileEventInput> = {}): CompileEventInput => ({
+    at: 1, day: '2026-10-01', userId: 'g:1', planId: 'free', engine: 'xelatex', wallMs: 1000, outcome: 'ok',
+    projectBytes: 10 * 1024, files: 3, uploadedBytes: 0, pdfBytes: 50 * 1024, texlive: '2023', ...over,
+  });
+
+  /** 사용자 g:1 은 9월 30일 2회·10월 1일 3회(+실패 1), g:2 는 10월 1일 1회·10월 2일 5회, 로그인 없는 줄 1개 */
+  function seeded(): LedgerStore {
+    const ledger = new LedgerStore(openDb(':memory:'));
+    const ai = (userId: string | null, day: string, n: number, over: Partial<AiEventInput> = {}) => {
+      for (let i = 0; i < n; i++) ledger.recordAi(event({ userId, day, ...over }));
+    };
+    ai('g:1', '2026-09-30', 2);
+    ai('g:1', '2026-10-01', 3);
+    ai('g:1', '2026-10-01', 1, { outcome: 'failed', usage: undefined });
+    ai('g:2', '2026-10-01', 1);
+    ai('g:2', '2026-10-02', 5, { ms: 3000 });
+    ai(null, '2026-10-02', 1);
+    ledger.recordCompile(compile({ wallMs: 2000 }));
+    ledger.recordCompile(compile({ wallMs: 1000, outcome: 'error' }));
+    ledger.recordCompile(compile({ wallMs: 5, outcome: 'cached' }));
+    ledger.recordCompile(compile({ wallMs: 0, outcome: 'busy' }));
+    ledger.recordCompile(compile({ userId: 'g:2', day: '2026-10-02', wallMs: 60_000, outcome: 'timeout', projectBytes: 900 * 1024, pdfBytes: null }));
+    ledger.recordCompile(compile({ engine: 'pdflatex', userId: 'g:3', wallMs: 800 }));
+    return ledger;
+  }
+
+  it('분포는 순위 기준 p50/p95 와 최대, 묶음 수를 낸다', () => {
+    expect(distribution([5, 1, 3])).toEqual({ n: 3, p50: 3, p95: 5, max: 5 });
+    expect(distribution([])).toEqual({ n: 0, p50: 0, p95: 0, max: 0 });
+  });
+
+  it('AI 작업별 토큰·걸린 시간 p50/p95 를 낸다', () => {
+    const [row] = seeded().summary('2026-10-01', '2026-10-31');
+    // 기간 안 요청: g:1 3+실패1, g:2 1+5(3초), 익명 1 = 11건. 걸린 시간 900ms 6건·3000ms 5건
+    expect(row).toMatchObject({ requests: 11, noUsage: 1, p50InputTokens: 20_000, p95OutputTokens: 3_000, p50Ms: 900, p95Ms: 3000 });
+  });
+
+  it('엔진별 컴파일 시간·크기는 일꾼이 실제로 돌린 것만 세고, 결과별 건수를 낸다', () => {
+    const rows = seeded().compileSummary('2026-10-01', '2026-10-31');
+    expect(rows.map((r) => r.engine)).toEqual(['pdflatex', 'xelatex']);
+    expect(rows[1]).toMatchObject({
+      requests: 5,
+      outcomes: { ok: 1, error: 1, cached: 1, busy: 1, timeout: 1 },
+      runs: 3,
+      p50WallMs: 2000,
+      p95WallMs: 60_000,
+      maxWallMs: 60_000,
+      p50ProjectBytes: 10 * 1024,
+      p95ProjectBytes: 900 * 1024,
+      p50PdfBytes: 50 * 1024,
+    });
+  });
+
+  it('사용자당 하루·월 분포: 실패는 횟수에서 빼고, 로그인 없는 줄은 빼며, 달을 나눠 센다', () => {
+    const u = seeded().userUsage('2026-09-01', '2026-10-31');
+    expect(u.activeUsers).toBe(3);
+    // 쓴 날별 횟수: g:1 9/30 2, 10/1 3 · g:2 10/1 1, 10/2 5
+    expect(u.aiPerUserDay.requests).toEqual({ n: 4, p50: 2, p95: 5, max: 5 });
+    // 쓴 달별 횟수: g:1 9월 2, 10월 3 · g:2 10월 6
+    expect(u.aiPerUserMonth.requests).toEqual({ n: 3, p50: 3, p95: 6, max: 6 });
+    expect(u.aiPerUserMonth.costMicroUsd.max).toBe(6 * 140_000);
+    // 컴파일: g:1 10/1 2회 3초 · g:2 10/2 1회 60초 · g:3 10/1 1회 0.8초
+    expect(u.compilePerUserDay.runs).toEqual({ n: 3, p50: 1, p95: 2, max: 2 });
+    expect(u.compilePerUserDay.seconds).toEqual({ n: 3, p50: 3, p95: 60, max: 60 });
+  });
+
+  it('보고 글에 세 부분이 모두 나오고, JSON 에도 같은 값이 있다', () => {
+    const r = buildReport(seeded(), '2026-10-01', '2026-10-31');
+    expect(r.text).toContain('걸린 시간 p50 0.9초 / p95 3.0초');
+    expect(r.text).toContain('xelatex: 요청 5건(busy 1, cached 1, error 1, ok 1, timeout 1) · 실제 실행 3건 · 시간 p50 2.0초 / p95 60.0초');
+    expect(r.text).toContain('쓴 사용자 3명');
+    expect(r.text).toContain('AI 하루 횟수 p50 3 / p95 5 / 최대 5 (3건)');
+    expect(r.json.users.aiPerUserDay.requests.n).toBe(3);
+    expect(r.json.compile).toHaveLength(2);
+    expect(buildReport(new LedgerStore(openDb(':memory:')), '2026-10-01', '2026-10-01').text).toContain('AI 하루 횟수 기록 없음');
   });
 });

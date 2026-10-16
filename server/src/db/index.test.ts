@@ -13,7 +13,7 @@ describe('데이터 파일 마이그레이션', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'alldoc-db-')), 'alldoc.sqlite');
     const db = openDb(file);
     expect(version(db)).toBe(MIGRATIONS.length);
-    expect(tables(db)).toEqual(['ai_events', 'audit_log', 'compile_events', 'entitlement_overrides', 'tex_blobs', 'usage', 'user_blobs', 'users']);
+    expect(tables(db)).toEqual(['ai_events', 'audit_log', 'compile_events', 'entitlement_overrides', 'invites', 'tex_blobs', 'usage', 'user_blobs', 'users']);
     db.close();
     const again = openDb(file);
     expect(version(again)).toBe(MIGRATIONS.length);
@@ -38,9 +38,20 @@ describe('데이터 파일 마이그레이션', () => {
     db.exec('PRAGMA user_version = 3');
     db.exec("INSERT INTO users (id, created_at, last_login_at) VALUES ('g:1', 1, 1)");
     migrate(db);
-    expect(version(db)).toBe(4);
+    expect(version(db)).toBe(MIGRATIONS.length);
     expect(db.prepare('SELECT id FROM users').all()).toEqual([{ id: 'g:1' }]);
     expect(tables(db)).toContain('compile_events');
+  });
+
+  it('M3 까지의 파일(버전 4)에 5번(베타 초대)을 더하면 기존 계정은 초대 없음(invite_id NULL)으로 남는다', () => {
+    const db = new DatabaseSync(':memory:');
+    for (let v = 0; v < 4; v++) db.exec(MIGRATIONS[v] as string);
+    db.exec('PRAGMA user_version = 4');
+    db.exec("INSERT INTO users (id, created_at, last_login_at) VALUES ('g:1', 1, 1)");
+    migrate(db);
+    expect(version(db)).toBe(5);
+    expect(db.prepare('SELECT id, invite_id FROM users').all()).toEqual([{ id: 'g:1', invite_id: null }]);
+    expect(tables(db)).toContain('invites');
   });
 
   it('서버보다 새 버전의 파일은 열지 않는다', () => {

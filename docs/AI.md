@@ -109,7 +109,7 @@ interface AiProvider {
   - 원가는 `server/src/ai/pricing.ts` 의 단가표(기준일이 함께 적혀 있음)로 계산해 정수 마이크로달러로 저장합니다. 표에 없는 모델(예: 파인튜닝 모델)은 가장 비싼 단가로 계산하고 서버 기록에 한 번 경고합니다. Haiku 5.5 의 캐시 읽기 단가와 긴 프롬프트의 캐시 단가는 가정한 값이라 가격표에서 확인이 필요합니다.
   - 데모 AI(`mock`)는 모델 `mock`, 토큰 0 으로 남습니다.
   - 원장은 원가 집계에 쓰므로 자동으로 지우지 않습니다.
-- **원가 보고**: `node --disable-warning=ExperimentalWarning server/dist/ledger-report.js --days 7` 이 기간 동안 작업·모델별 요청 수, 합계, 1건 원가 p50/p95, 평균 토큰을 보여 줍니다(`--from`·`--to`·`--json` 도 받습니다. 데이터 폴더는 `DATA_DIR`). 컨테이너에서는 `docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/ledger-report.js` 처럼 돌립니다.
+- **원가 보고**: `node --disable-warning=ExperimentalWarning server/dist/ledger-report.js --days 7` 이 기간 동안 작업·모델별 요청 수, 합계, 1건 원가 p50/p95, 평균 토큰, 입력·출력 토큰과 걸린 시간 p50/p95 를 보여 주고, 이어서 컴파일 시간과 사용자당 하루·월 사용량 분포도 보여 줍니다(`docs/DEPLOY.md` "가격 근거 보고")(`--from`·`--to`·`--json` 도 받습니다. 데이터 폴더는 `DATA_DIR`). 컨테이너에서는 `docker compose exec alldoc node --disable-warning=ExperimentalWarning server/dist/ledger-report.js` 처럼 돌립니다.
   - **진짜 Claude 호출로 쌓인 값은 아직 없습니다.** 실제 키로 쓰기 시작한 뒤의 p50/p95 를 이 문서에 기능별로 적을 예정입니다.
 - 요청을 보내기 **전에** 횟수를 하나 쓰고, 연결·응답 실패면 돌려줍니다. 모델이 정책상 거절한 경우는 돌려주지 않습니다.
 - 같은 사용자의 요청은 한 번에 하나만 처리합니다(진행 중 요청이 있으면 "이전 요청을 처리하는 중"이라고 안내).
@@ -134,6 +134,11 @@ Claude는 정책상 답을 거절할 때가 있습니다. 이때 서버 쪽에�
 - 대체 모델이 답하면 비용·응답 품질이 달라질 수 있습니다. 쓰지 않으려면 설정 파일에서 `"fallbacks": "off"`로 끄세요.
 - **이 코드는 실제 API 키 없이 개발해서, 진짜 Claude 호출은 아직 시험하지 못했습니다.** 자동 시험은 가짜 클라이언트로 요청 모양과 오류 처리만 확인합니다.
   운영 전에 실제 키로 "AI 대화"와 "내 규칙"을 한 번씩 돌려 보고, 서버 기록에 경고가 없는지 확인하세요.
+- **진짜 호출 확인 도구**: `ANTHROPIC_API_KEY=… node --disable-warning=ExperimentalWarning server/dist/live-check.js --yes --out live-check.json`
+  - 작업 4개(chat·format_check·tex_chat·tex_fix)에 지어낸 짧은 예시 문서를 보내고, 작업마다 기본 2번 부릅니다(기본 8번 호출, `--repeat`·`--tasks` 로 줄일 수 있음). 요금이 들어서 `--yes` 가 없으면 돌지 않습니다.
+  - 확인하는 것: 모든 호출이 성공했는지, `usage` 를 받는지, 대체 모델 옵션(베타)이 받아들여졌는지, 두 번째 호출에서 `cache_read_input_tokens > 0` 인지, 응답한 모델 이름과 `usage.iterations` 항목 종류, 호출별 토큰·원가·시간, 서버 검증을 통과한 제안 수.
+  - 설정(`AI_CONFIG_PATH` 의 모델·추론 강도·캐시 범위)은 서버와 같고, 기록은 메모리 원장에만 남습니다(서버 데이터 파일은 건드리지 않음). 결과 파일에는 숫자·모델 이름·종료 이유만 담깁니다.
+  - 이 도구도 가짜 클라이언트로만 시험했습니다(`server/src/live-check.test.ts`). 실제 키로 돌린 결과는 아직 없습니다.
 
 ## 데모(`mock`)
 

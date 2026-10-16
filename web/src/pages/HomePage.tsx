@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import DropZone from '../components/DropZone';
 import Nav from '../components/Nav';
+import SiteFooter from '../components/SiteFooter';
 import RecentList from '../components/RecentList';
 import TexTemplates from '../components/TexTemplates';
 import TopBar from '../components/TopBar';
@@ -47,6 +48,7 @@ export default function HomePage() {
               <p className="empty">아직 연 문서가 없어요. 위에 파일을 놓아 시작해 보세요.</p>
             )}
           </section>
+          <SiteFooter />
         </main>
       </div>
     </div>

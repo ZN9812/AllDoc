@@ -4,6 +4,7 @@
 import { join } from 'node:path';
 import type { AuditLog } from './audit';
 import type { AccountStore, Account } from './auth/accounts';
+import { displayCode, type Invite, type InviteStore } from './auth/invites';
 import { deleteAccount } from './auth/deletion';
 import { monthStart, type EntitlementStore } from './billing/entitlements';
 import type { Config } from './config';
@@ -20,10 +21,14 @@ export const ADMIN_HELP = `사용법: admin.js <명령>
   logout-all <번호>                       모든 기기에서 로그아웃시키기
   role <번호> admin|user                  역할 바꾸기
   delete <번호> --yes                     탈퇴시키기(되돌릴 수 없음)
-  audit [번호]                            최근 관리 기록`;
+  audit [번호]                            최근 관리 기록
+  invite add email <이메일> [--days N] [--note 메모]          비공개 베타 이메일 허용 목록에 넣기
+  invite add code [코드] [--uses N] [--days N] [--note 메모]  초대 코드 만들기(코드를 안 적으면 무작위)
+  invite list [--all]                     초대 목록(--all 이면 거둔 것도)
+  invite revoke <초대 번호>                초대 거두기(그 초대로 들어온 계정도 베타 중에는 막힘)`;
 
 export interface AdminContext {
-  config: Pick<Config, 'plans' | 'timezone' | 'sessionSecret'>;
+  config: Pick<Config, 'plans' | 'timezone' | 'sessionSecret'> & { beta?: boolean };
   accounts: AccountStore;
   entitlements: EntitlementStore;
   quota: QuotaStore;
@@ -31,8 +36,24 @@ export interface AdminContext {
   /** 탈퇴할 때 컴파일하려고 올린 파일 기록도 지운다 */
   tex?: TexStore;
   audit: AuditLog;
+  /** 비공개 베타 초대(invite 명령) */
+  invites?: InviteStore;
   now: number;
   actor: string;
+}
+
+const positiveInt = (raw: string | undefined, name: string): number | null => {
+  if (raw === undefined) return null;
+  const n = Number(raw);
+  if (!(Number.isInteger(n) && n > 0)) throw new Error(`${name} 는 1 이상의 정수여야 해요.`);
+  return n;
+};
+
+function inviteLine(i: Invite, now: number): string {
+  const what = i.kind === 'email' ? `이메일 ${i.value}` : `코드 ${displayCode(i.value)}`;
+  const uses = i.kind === 'code' ? ` · 사용 ${i.uses}${i.maxUses === null ? '' : `/${i.maxUses}`}회` : '';
+  const state = i.revokedAt !== null ? ' · 거둠' : i.expiresAt !== null && i.expiresAt <= now ? ' · 만료' : '';
+  return `#${i.id} ${what}${uses} · 들어온 계정 ${i.members} · ${i.expiresAt === null ? '기한 없음' : `${fmt(i.expiresAt)} 까지`}${state}${i.note ? ` · ${i.note}` : ''}`;
 }
 
 const fmt = (ms: number | null) => (ms === null ? '-' : new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ' UTC');
@@ -134,6 +155,41 @@ export function runAdmin(args: string[], ctx: AdminContext): string {
           .map((e) => `${fmt(e.at)} ${e.actor} ${e.action} ${e.target ?? ''} ${e.detail ?? ''}`.trimEnd())
           .join('\n') || '기록이 없어요.'
       );
+    case 'invite': {
+      const inv = ctx.invites;
+      if (!inv) throw new Error('초대 저장소가 없어요.');
+      const off = ctx.config.beta === false ? '\n(참고: 지금 BETA_MODE 가 꺼져 있어 초대는 BETA_MODE=invite 로 켰을 때부터 효력이 있어요.)' : '';
+      if (a1 === 'list') {
+        const rows = inv.list(args.includes('--all'));
+        return (rows.length === 0 ? '초대가 없어요.' : rows.map((i) => inviteLine(i, now)).join('\n')) + off;
+      }
+      if (a1 === 'add') {
+        const days = positiveInt(flag(args, '--days'), '--days');
+        const expiresAt = days === null ? null : now + days * 86_400_000;
+        const note = flag(args, '--note') ?? null;
+        const third = args[3] !== undefined && !args[3].startsWith('--') ? args[3] : null;
+        let created: Invite;
+        if (a2 === 'email') {
+          if (!third) throw new Error('넣을 이메일을 적어 주세요.');
+          created = inv.addEmail(third, { expiresAt, note, actor, now });
+        } else if (a2 === 'code') {
+          created = inv.addCode(third, { maxUses: positiveInt(flag(args, '--uses'), '--uses'), expiresAt, note, actor, now });
+        } else {
+          throw new Error(`invite add 다음에 email 또는 code 를 적어 주세요.\n${ADMIN_HELP}`);
+        }
+        log('invite.add', `invite:${created.id}`, { kind: created.kind, maxUses: created.maxUses, expiresAt, note });
+        return `초대를 만들었어요: ${inviteLine(created, now)}${off}`;
+      }
+      if (a1 === 'revoke') {
+        const id = positiveInt(a2, '초대 번호');
+        if (id === null) throw new Error('거둘 초대 번호를 적어 주세요(invite list 로 확인).');
+        const users = inv.revoke(id, now);
+        if (users === null) return `#${id} 는 없거나 이미 거둔 초대예요.`;
+        log('invite.revoke', `invite:${id}`, { users });
+        return `#${id} 초대를 거뒀어요. 이 초대로 들어온 계정 ${users.length}개는 베타 중에는 다시 초대받아야 들어올 수 있어요.`;
+      }
+      throw new Error(`invite 다음에 add · list · revoke 중 하나를 적어 주세요.\n${ADMIN_HELP}`);
+    }
     default:
       throw new Error(ADMIN_HELP);
   }
@@ -151,6 +207,7 @@ if (process.argv[1] && /admin\.(js|ts)$/.test(process.argv[1])) {
   const { LedgerStore } = await import('./ledger');
   const { AuditLog } = await import('./audit');
   const { TexStore } = await import('./tex/store');
+  const { InviteStore } = await import('./auth/invites');
   let db;
   try {
     const config = loadConfig();
@@ -163,6 +220,7 @@ if (process.argv[1] && /admin\.(js|ts)$/.test(process.argv[1])) {
       ledger: new LedgerStore(db),
       tex: new TexStore(db, config.dataDir),
       audit: new AuditLog(db),
+      invites: new InviteStore(db),
       now: Date.now(),
       actor: `admin-cli:${process.env.USER ?? process.env.HOSTNAME ?? 'unknown'}`,
     });

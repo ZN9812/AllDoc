@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import Nav from '../components/Nav';
+import SiteFooter from '../components/SiteFooter';
 import RecentList from '../components/RecentList';
 import TopBar from '../components/TopBar';
 import { filterDocs } from '../lib/docs';
@@ -31,6 +32,7 @@ export default function MyDocsPage() {
             <p className="empty">저장된 문서가 없어요. "새 문서"에서 파일을 열면 여기에 쌓여요.</p>
           )}
           <p className="empty">문서는 이 브라우저에만 저장돼요(LaTeX 프로젝트는 컴파일할 때만 파일을 서버로 보내요). 브라우저 데이터를 지우면 함께 사라지니, 중요한 문서는 내려받아 따로 보관하세요.</p>
+          <SiteFooter />
         </main>
       </div>
     </div>

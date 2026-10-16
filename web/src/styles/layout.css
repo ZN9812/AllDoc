@@ -507,3 +507,67 @@
   padding: 6px 8px;
   max-width: 240px;
 }
+
+/* ---- 하단: 정책 문서·문의 창구·사업자 정보 ---- */
+.site-footer {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.site-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.site-footer a {
+  color: var(--muted);
+}
+
+.site-footer .biz {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 8px 0 0;
+}
+
+.site-footer .biz div {
+  display: flex;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
+.site-footer dd {
+  margin: 0;
+}
+
+/* ---- 정책 문서 ---- */
+.policy {
+  max-width: 760px;
+  font-size: 14px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.policy h1 {
+  margin-top: 0;
+  font-size: 20px;
+}
+
+.policy h2 {
+  font-size: 16px;
+}
+
+.policy table {
+  border-collapse: collapse;
+}
+
+.policy th,
+.policy td {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+}

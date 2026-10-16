@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { DocKind } from '@alldoc/shared';
 import type { TexScope } from '../engines/types';
 import { askAi } from '../ai/actions';
-import { loginUrl } from '../ai/client';
+import LoginLink from '../components/LoginLink';
 import { useLocation, Link } from 'react-router-dom';
 import { aiAvailability, useAuth } from '../state/auth';
 import { useTerms } from '../state/terms';
@@ -65,9 +65,9 @@ export default function ChatPane({ kind }: { kind: DocKind }) {
           {avail.reason === 'login' && (
             <>
               <p className="mut">로그인은 하루 사용 횟수를 관리하는 데만 쓰이고, 문서는 이 브라우저에만 저장됩니다. 문서 편집과 서식 점검은 로그인 없이 쓸 수 있어요.</p>
-              <a className="btn primary" href={loginUrl(loc.pathname + loc.search)}>
+              <LoginLink className="btn primary" next={loc.pathname + loc.search}>
                 {me?.authMode === 'dev' ? '로그인(개발용)' : '구글로 로그인'}
-              </a>
+              </LoginLink>
             </>
           )}
           {avail.reason === 'agreement' && (

@@ -1,8 +1,8 @@
-// 서버를 dist/main.js 하나로, 원장 보고 명령을 dist/ledger-report.js, 관리자 도구를 dist/admin.js 로 묶는다. node: 내장 모듈(node:sqlite 등)은 그대로 둔다.
+// 서버를 dist/main.js 하나로, 원장 보고 명령을 dist/ledger-report.js, 관리자 도구를 dist/admin.js, 진짜 호출 확인을 dist/live-check.js 로 묶는다. node: 내장 모듈(node:sqlite 등)은 그대로 둔다.
 import { build } from 'esbuild';
 
 await build({
-  entryPoints: ['src/main.ts', 'src/ledger-report.ts', 'src/admin.ts'],
+  entryPoints: ['src/main.ts', 'src/ledger-report.ts', 'src/admin.ts', 'src/live-check.ts'],
   outdir: 'dist',
   bundle: true,
   platform: 'node',

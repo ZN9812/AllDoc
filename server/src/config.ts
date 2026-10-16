@@ -64,7 +64,47 @@ export interface Config {
   terms: { version: string; termsUrl: string; privacyUrl: string } | null;
   /** LaTeX 컴파일. null 이면 끔(COMPILER=off, 기본) */
   compiler: CompilerSettings | null;
+  /** 비공개 베타: 초대받은 사람만 로그인·가입(BETA_MODE=invite). 기본 꺼짐 */
+  beta: boolean;
+  /** 하단에 보여 줄 사업자 정보와 문의 창구, 정책 문서 폴더(GET /api/site) */
+  site: SiteSettings;
 }
+
+export interface SiteSettings {
+  /** 비어 있는 항목은 보여 주지 않는다. 모두 비면 null */
+  business: BusinessInfo | null;
+  contact: { email: string | null; url: string | null } | null;
+  /** 이용약관·개인정보처리방침·환불정책 md 파일을 둔 폴더(POLICY_DIR). null 이면 모두 "준비 중" */
+  policyDir: string | null;
+}
+
+/** 전자상거래법 등에 따라 하단에 적는 값. 서버는 값을 확인하지 않고 운영자가 넣은 그대로 보여 준다. */
+export interface BusinessInfo {
+  name: string | null;
+  owner: string | null;
+  registrationNo: string | null;
+  mailOrderNo: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  privacyOfficer: string | null;
+  hosting: string | null;
+}
+
+/** 사업자 정보 환경 변수와 화면 항목의 짝 */
+export const BUSINESS_ENV = {
+  name: 'BUSINESS_NAME',
+  owner: 'BUSINESS_OWNER',
+  registrationNo: 'BUSINESS_REG_NO',
+  mailOrderNo: 'BUSINESS_MAIL_ORDER_NO',
+  address: 'BUSINESS_ADDRESS',
+  phone: 'BUSINESS_PHONE',
+  email: 'BUSINESS_EMAIL',
+  privacyOfficer: 'BUSINESS_PRIVACY_OFFICER',
+  hosting: 'BUSINESS_HOSTING',
+} as const satisfies Record<keyof BusinessInfo, string>;
+
+export const BETA_MODES = ['off', 'invite'] as const;
 
 export const COMPILER_MODES = ['off', 'mock', 'http'] as const;
 
@@ -121,6 +161,19 @@ const EnvSchema = z.object({
   COMPILER_QUEUE: z.coerce.number().int().min(0).max(1000).default(10),
   TEX_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(7),
   ALLOWED_ORIGINS: z.string().optional(),
+  BETA_MODE: z.enum(BETA_MODES).default('off'),
+  CONTACT_EMAIL: z.email().optional(),
+  CONTACT_URL: z.url().optional(),
+  POLICY_DIR: z.string().optional(),
+  BUSINESS_NAME: z.string().max(200).optional(),
+  BUSINESS_OWNER: z.string().max(200).optional(),
+  BUSINESS_REG_NO: z.string().max(200).optional(),
+  BUSINESS_MAIL_ORDER_NO: z.string().max(200).optional(),
+  BUSINESS_ADDRESS: z.string().max(200).optional(),
+  BUSINESS_PHONE: z.string().max(200).optional(),
+  BUSINESS_EMAIL: z.string().max(200).optional(),
+  BUSINESS_PRIVACY_OFFICER: z.string().max(200).optional(),
+  BUSINESS_HOSTING: z.string().max(200).optional(),
 });
 
 const TaskFileSchema = z
@@ -327,6 +380,15 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
     };
   }
 
+  if (env.BETA_MODE === 'invite' && env.AUTH_MODE === 'none') {
+    problems.push('BETA_MODE=invite 는 로그인이 있어야 해요. AUTH_MODE=none 과 함께 쓸 수 없어요.');
+  }
+  if (env.CONTACT_URL && !/^https?:\/\//.test(env.CONTACT_URL)) problems.push('CONTACT_URL 은 http:// 또는 https:// 주소여야 해요.');
+
+  const businessEntries = Object.entries(BUSINESS_ENV).map(([field, key]) => [field, env[key] ?? null] as const);
+  const business = businessEntries.some(([, v]) => v !== null) ? (Object.fromEntries(businessEntries) as unknown as BusinessInfo) : null;
+  const contact = env.CONTACT_EMAIL || env.CONTACT_URL ? { email: env.CONTACT_EMAIL ?? null, url: env.CONTACT_URL ?? null } : null;
+
   if (problems.length > 0) throw new ConfigError(problems);
 
   const origins = new Set<string>([new URL(publicUrl).origin]);
@@ -359,5 +421,7 @@ export function loadConfig(overrides: Partial<LoadDeps> = {}): Config {
     aiDailyBudgetMicroUsd: env.AI_DAILY_BUDGET_USD ? Math.round(env.AI_DAILY_BUDGET_USD * 1_000_000) : null,
     terms: env.TERMS_VERSION && env.TERMS_URL && env.PRIVACY_URL ? { version: env.TERMS_VERSION, termsUrl: env.TERMS_URL, privacyUrl: env.PRIVACY_URL } : null,
     compiler,
+    beta: env.BETA_MODE === 'invite',
+    site: { business, contact, policyDir: env.POLICY_DIR ? resolve(env.POLICY_DIR) : null },
   };
 }
