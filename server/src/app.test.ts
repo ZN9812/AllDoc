@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ACCOUNT_DELETE_CONFIRM, type AiRequest, type AiResponse, type ErrorResponse, type MeResponse, type PolicyResponse, type SiteInfo } from '@alldoc/shared';
@@ -27,6 +27,9 @@ function setup(env: Record<string, string> = {}, over: Partial<AppDeps> = {}) {
   writeFileSync(join(dist, 'index.html'), '<!doctype html><title>AllDoc</title>');
   writeFileSync(join(dist, 'assets', 'app-abc123.js'), 'console.log(1)');
   writeFileSync(join(dist, 'favicon.svg'), '<svg/>');
+  mkdirSync(join(dist, 'rhwp-studio', 'assets'), { recursive: true });
+  writeFileSync(join(dist, 'rhwp-studio', 'index.html'), '<!doctype html><title>studio</title>');
+  writeFileSync(join(dist, 'rhwp-studio', 'assets', 'studio-abc123.js'), 'console.log(2)');
 
   const config = testConfig({ WEB_DIST: dist, ...env });
   const db = openDb(':memory:');
@@ -400,7 +403,7 @@ describe('AI 제안(/api/ai/propose)', () => {
 });
 
 describe('웹 앱 제공', () => {
-  const { app } = setup();
+  const { app, config } = setup();
 
   it('주소가 앱 화면(/docs, /edit/..)이면 index.html 을 준다', async () => {
     for (const path of ['/', '/docs', '/settings', '/edit/abc-123']) {
@@ -419,6 +422,29 @@ describe('웹 앱 제공', () => {
     expect(hit.headers.get('cache-control')).toContain('immutable');
     expect((await app.request('/assets/missing.js')).status).toBe(404);
     expect((await app.request('/favicon.svg')).headers.get('content-type')).toBe('image/svg+xml');
+  });
+
+  it('한글 편집기(/rhwp-studio/assets/)의 해시 파일도 오래 캐시하고, 해시가 없는 파일은 매번 확인한다', async () => {
+    const hashed = await app.request('/rhwp-studio/assets/studio-abc123.js');
+    expect(hashed.status).toBe(200);
+    expect(hashed.headers.get('cache-control')).toContain('immutable');
+    expect((await app.request('/rhwp-studio/index.html')).headers.get('cache-control')).toBe('no-cache');
+  });
+
+  it('주소가 해시 폴더처럼 보여도 그 폴더의 파일이 아니면(없는 주소가 대신 받는 앱 화면, ..%2f 로 빠져나간 파일) 오래 캐시하지 않는다', async () => {
+    for (const path of ['/assets/typo', '/rhwp-studio/assets/', '/assets/..%2findex.html', '/rhwp-studio/assets/..%2f..%2findex.html']) {
+      const res = await app.request(path);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain('<title>AllDoc</title>');
+      expect(res.headers.get('cache-control'), path).toBe('no-cache');
+    }
+  });
+
+  it('이름만 비슷한 폴더(assets-old)의 파일은 해시 폴더가 아니므로 오래 캐시하지 않는다', async () => {
+    const dir = join(config.webDist, 'assets-old');
+    mkdirSync(dir);
+    writeFileSync(join(dir, 'x.js'), 'console.log(3)');
+    expect((await app.request('/assets-old/x.js')).headers.get('cache-control')).toBe('no-cache');
   });
 
   it('폴더 밖의 파일은 줄 수 없다', async () => {
@@ -852,5 +878,128 @@ describe('운영 정보(/api/site)와 정책 문서', () => {
 
   it('문의 주소는 http(s) 만 받는다', () => {
     expect(() => testConfig({ CONTACT_URL: 'javascript:alert(1)' })).toThrow();
+  });
+});
+
+describe('조건부 요청(재방문 때 본문을 다시 받지 않는다)', () => {
+  const { app, config } = setup();
+  const HASHED = '/rhwp-studio/assets/studio-abc123.js';
+  // 수정 시각을 시험에서 직접 정해 두면 밀리초 소수부(.500)와 초 경계가 우연에 기대지 않는다.
+  const put = (name: string, text: string, mtime: string) => {
+    const file = join(config.webDist, name);
+    writeFileSync(file, text);
+    utimesSync(file, new Date(mtime), new Date(mtime));
+  };
+  const PLAIN = '/favicon.svg';
+
+  const validators = async (path: string) => {
+    const res = await app.request(path);
+    return { etag: res.headers.get('etag') ?? '', modified: res.headers.get('last-modified') ?? '' };
+  };
+
+  it('받아 둔 ETag 를 보내면 304 와 빈 본문을 주고, 캐시 규칙과 검증값을 다시 알려 준다', async () => {
+    const { etag, modified } = await validators(HASHED);
+    expect(etag).not.toBe('');
+    const res = await app.request(HASHED, { headers: { 'if-none-match': etag } });
+    expect(res.status).toBe(304);
+    expect(await res.text()).toBe('');
+    expect(res.headers.get('etag')).toBe(etag);
+    expect(res.headers.get('last-modified')).toBe(modified);
+    expect(res.headers.get('cache-control')).toContain('immutable');
+  });
+
+  it('날짜(If-Modified-Since)만 보내도 그 뒤로 바뀌지 않았으면 304', async () => {
+    const { modified } = await validators(PLAIN);
+    const res = await app.request(PLAIN, { headers: { 'if-modified-since': modified } });
+    expect(res.status).toBe(304);
+    expect(res.headers.get('cache-control')).toBe('no-cache');
+  });
+
+  it('여러 ETag 중 하나가 맞거나, 약한 표시(W/)만 다르면 같은 파일로 본다', async () => {
+    const { etag } = await validators(PLAIN);
+    const list = await app.request(PLAIN, { headers: { 'if-none-match': `W/"stale", ${etag}` } });
+    expect(list.status).toBe(304);
+    const strong = await app.request(PLAIN, { headers: { 'if-none-match': etag.replace(/^W\//, '') } });
+    expect(strong.status).toBe(304);
+  });
+
+  it('HEAD 요청도 같은 규칙으로 304', async () => {
+    const { etag } = await validators(PLAIN);
+    const res = await app.request(PLAIN, { method: 'HEAD', headers: { 'if-none-match': etag } });
+    expect(res.status).toBe(304);
+  });
+
+  it('검증값이 맞지 않으면(파일이 바뀌었으면) 새로 보낸다', async () => {
+    const { modified } = await validators(PLAIN);
+    const staleEtag = await app.request(PLAIN, { headers: { 'if-none-match': 'W/"stale"' } });
+    expect(staleEtag.status).toBe(200);
+    expect(await staleEtag.text()).toBe('<svg/>');
+
+    const older = new Date(Date.parse(modified) - 3_600_000).toUTCString();
+    expect((await app.request(PLAIN, { headers: { 'if-modified-since': older } })).status).toBe(200);
+    expect((await app.request(PLAIN, { headers: { 'if-modified-since': 'not-a-date' } })).status).toBe(200);
+  });
+
+  it('ETag 를 보냈으면 날짜는 보지 않는다(ETag 가 틀리면 날짜가 맞아도 새로 보낸다)', async () => {
+    const { modified } = await validators(PLAIN);
+    const res = await app.request(PLAIN, { headers: { 'if-none-match': 'W/"stale"', 'if-modified-since': modified } });
+    expect(res.status).toBe(200);
+  });
+
+  it('If-None-Match: * 는 있는 파일에는 304 이고, 없는 파일은 그대로 404', async () => {
+    expect((await app.request(PLAIN, { headers: { 'if-none-match': '*' } })).status).toBe(304);
+    expect((await app.request('/assets/nope.js', { headers: { 'if-none-match': '*' } })).status).toBe(404);
+  });
+
+  it('크기가 같아도 수정 시각이 바뀐 파일은 새로 보낸다(이전 ETag 로 물어도 200 과 새 본문)', async () => {
+    put('swap.txt', 'aaaa', '2026-10-01T03:00:00.250Z');
+    const etag = (await app.request('/swap.txt')).headers.get('etag') ?? '';
+    put('swap.txt', 'bbbb', '2026-10-01T04:00:00.250Z'); // 같은 4바이트, 한 시간 뒤
+    const res = await app.request('/swap.txt', { headers: { 'if-none-match': etag } });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('bbbb');
+    expect(res.headers.get('etag')).not.toBe(etag);
+  });
+
+  it('수정 시각이 같아도 크기가 다르면 새로 보낸다', async () => {
+    put('len.txt', 'aa', '2026-10-01T03:00:00.250Z');
+    const etag = (await app.request('/len.txt')).headers.get('etag') ?? '';
+    put('len.txt', 'aaa', '2026-10-01T03:00:00.250Z'); // 같은 수정 시각, 1바이트 더 길다
+    const res = await app.request('/len.txt', { headers: { 'if-none-match': etag } });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('aaa');
+  });
+
+  it('같은 초 안에 같은 크기로 다시 쓴 파일도 새로 보낸다(ETag 는 수정 시각을 밀리초까지 본다)', async () => {
+    put('ms.txt', 'aaaa', '2026-10-01T03:00:00.250Z');
+    const etag = (await app.request('/ms.txt')).headers.get('etag') ?? '';
+    put('ms.txt', 'bbbb', '2026-10-01T03:00:00.750Z');
+    const res = await app.request('/ms.txt', { headers: { 'if-none-match': etag } });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('bbbb');
+  });
+
+  it('If-Modified-Since 는 초 단위로 비교한다(수정 시각의 밀리초는 무시, 1초만 일러도 새로 보낸다)', async () => {
+    put('sec.txt', 'x', '2026-10-01T03:00:00.500Z');
+    const same = await app.request('/sec.txt', { headers: { 'if-modified-since': 'Thu, 01 Oct 2026 03:00:00 GMT' } });
+    expect(same.status).toBe(304);
+    const older = await app.request('/sec.txt', { headers: { 'if-modified-since': 'Thu, 01 Oct 2026 02:59:59 GMT' } });
+    expect(older.status).toBe(200);
+  });
+
+  it('gzip 으로 보내든 아니든 ETag 가 같고, 그 ETag 로 다시 물으면 압축 표시 없는 304', async () => {
+    put('big.js', 'a'.repeat(5000), '2026-10-01T03:00:00.000Z');
+    const plain = await app.request('/big.js');
+    const res = await app.request('/big.js', { headers: { 'accept-encoding': 'gzip' } });
+    expect(plain.headers.get('content-encoding')).toBeNull();
+    expect(res.headers.get('content-encoding')).toBe('gzip');
+    const etag = res.headers.get('etag') ?? '';
+    expect(etag).not.toBe('');
+    expect(plain.headers.get('etag')).toBe(etag);
+
+    const again = await app.request('/big.js', { headers: { 'accept-encoding': 'gzip', 'if-none-match': etag } });
+    expect(again.status).toBe(304);
+    expect(again.headers.get('content-encoding')).toBeNull();
+    expect(await again.text()).toBe('');
   });
 });
