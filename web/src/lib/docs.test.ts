@@ -1,7 +1,7 @@
 // @vitest-environment node
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDoc, filterDocs, getDoc, listDocs, removeDoc, resetDbConnection, restoreOriginal, saveWorking, touchOpened } from './docs';
 
 const blob = (s: string) => new Blob([s], { type: 'text/plain' });
@@ -12,7 +12,18 @@ beforeEach(() => {
   resetDbConnection();
 });
 
+afterEach(() => vi.unstubAllGlobals());
+
 describe('브라우저 문서 저장소', () => {
+  it('crypto.randomUUID 가 없는 주소(사내망 http)에서도 문서를 저장하고 다시 읽는다', async () => {
+    const real = globalThis.crypto;
+    vi.stubGlobal('crypto', { getRandomValues: real.getRandomValues.bind(real) });
+
+    const meta = await createDoc({ name: '사내.txt', kind: 'txt', blob: blob('내용') }, 1000);
+
+    expect((await getDoc(meta.id))?.meta.name).toBe('사내.txt');
+  });
+
   it('올린 문서를 저장하고 다시 읽는다(원본과 작업본이 같다)', async () => {
     const meta = await createDoc({ name: '보고서.txt', kind: 'txt', blob: blob('안녕') }, 1000);
     expect(meta).toMatchObject({ name: '보고서.txt', kind: 'txt', size: 6, edited: false, createdAt: 1000, openedAt: 1000 });

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { uuid } from '../lib/uuid';
 
 /** 서식 점검의 "내 규칙": 말로 적은 규칙을 이 브라우저에 저장해 두고 다시 쓴다. */
 export interface SavedRule {
@@ -42,7 +43,7 @@ export const useRules = create<RulesState>((set, get) => ({
     const t = text.trim();
     if (!t) return null;
     const name = t.replace(/\s+/g, ' ').slice(0, 24);
-    const rule: SavedRule = { id: crypto.randomUUID(), name, text: t };
+    const rule: SavedRule = { id: uuid(), name, text: t };
     const rules = [rule, ...get().rules.filter((r) => r.text !== t)].slice(0, MAX_RULES);
     persist(rules);
     set({ rules });

@@ -6,6 +6,7 @@
 import { unzipSync, zipSync, type Zippable } from 'fflate';
 import { isLatexmkrc, isTexSource, MAX_TEX_FILES, normalizeProjectPath, TEX_ENGINES, type TexEngine } from '@alldoc/shared';
 import type { NewTexFile, TexProjectMeta } from './docs';
+import { sha256 } from './sha256';
 
 /** 가져올 때 풀어 놓을 수 있는 전체 크기(브라우저 메모리를 지키려는 상한). 컴파일할 수 있는 크기는 요금제가 따로 정한다. */
 export const MAX_IMPORT_BYTES = 200 * 1024 * 1024;
@@ -208,9 +209,10 @@ export function importSingleTex(name: string, bytes: Uint8Array): ImportedProjec
 }
 
 export async function sha256Hex(data: Blob | Uint8Array): Promise<string> {
-  const buf = data instanceof Blob ? await data.arrayBuffer() : data;
-  const digest = await crypto.subtle.digest('SHA-256', buf as BufferSource);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const buf = data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : data;
+  // crypto.subtle 은 HTTPS·localhost 에서만 있다. 사내망 http 주소에서는 sha256.ts 로 대신한다.
+  const digest = crypto.subtle ? new Uint8Array(await crypto.subtle.digest('SHA-256', buf as BufferSource)) : sha256(buf);
+  return [...digest].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 const mimeOf = (path: string) => (isTexSource(path) || /\.(bib|sty|cls|txt|md)$/i.test(path) ? 'text/plain;charset=utf-8' : 'application/octet-stream');

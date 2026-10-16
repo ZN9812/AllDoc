@@ -3,7 +3,7 @@ import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { unzipSync, zipSync } from 'fflate';
 import { openDB } from 'idb';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTexDoc, DB_VERSION, getDoc, listDocs, listTexFiles, removeDoc, replaceTexFiles, resetDbConnection, updateTexFiles } from './docs';
 import { exportZip, importSingleTex, importZip, pickEngine, pickMain, readCentralDirectory, sha256Hex, skippedNotice, TexImportError, toRecords } from './texProject';
 
@@ -14,6 +14,8 @@ beforeEach(() => {
   globalThis.indexedDB = new IDBFactory();
   resetDbConnection();
 });
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('ZIP 가져오기', () => {
   it('파일을 풀고 주 파일·엔진을 고르며, 폴더 하나로 감싼 ZIP 은 그 폴더를 벗긴다', () => {
@@ -152,6 +154,19 @@ describe('LaTeX 프로젝트 저장(IndexedDB)', () => {
     await removeDoc(meta.id);
     expect(await getDoc(meta.id)).toBeNull();
     expect(await listTexFiles(meta.id)).toEqual([]);
+  });
+
+  it('crypto.subtle·randomUUID 가 없는 주소(사내망 http)에서도 같은 해시로 프로젝트를 만든다', async () => {
+    const real = globalThis.crypto;
+    const [secure] = await toRecords([{ path: 'main.tex', bytes: enc.encode(MAIN) }]);
+    vi.stubGlobal('crypto', { getRandomValues: real.getRandomValues.bind(real) });
+
+    const files = await toRecords([{ path: 'main.tex', bytes: enc.encode(MAIN) }]);
+    const meta = await createTexDoc({ name: '사내.tex', original: new Blob([MAIN]), files, project: { main: 'main.tex', engine: 'xelatex' } });
+
+    // 서버는 받은 파일의 SHA-256 을 다시 계산해 대조하므로(server/src/tex/routes.ts) 안전한 주소에서와 같은 값이어야 한다.
+    expect(files[0]!.hash).toBe(secure!.hash);
+    expect((await listTexFiles(meta.id)).map((f) => f.path)).toEqual(['main.tex']);
   });
 
   it('다른 문서의 파일은 섞이지 않는다', async () => {

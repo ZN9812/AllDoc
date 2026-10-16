@@ -1,6 +1,7 @@
 // 브라우저 저장소(IndexedDB). 문서는 이 브라우저에만 저장한다(LaTeX 프로젝트는 컴파일할 때만 파일을 서버로 보낸다, editor/tex/compile.ts).
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { DocKind, TexEngine } from '@alldoc/shared';
+import { uuid } from './uuid';
 
 /** LaTeX 프로젝트 설정(kind === 'tex' 일 때만) */
 export interface TexProjectMeta {
@@ -81,7 +82,7 @@ function abortQuietly(tx: { abort(): void; done: Promise<void> }): void {
 
 export async function createDoc(input: { name: string; kind: DocKind; blob: Blob }, now: number = Date.now()): Promise<DocMeta> {
   const meta: DocMeta = {
-    id: crypto.randomUUID(),
+    id: uuid(),
     name: input.name,
     kind: input.kind,
     size: input.blob.size,
@@ -191,7 +192,7 @@ export async function createTexDoc(
   now: number = Date.now(),
 ): Promise<DocMeta> {
   const meta: DocMeta = {
-    id: crypto.randomUUID(),
+    id: uuid(),
     name: input.name,
     kind: 'tex',
     size: projectSize(input.files),
